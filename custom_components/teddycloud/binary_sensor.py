@@ -33,3 +33,10 @@ class TeddyCloudOnlineBinarySensor(TeddyCloudBoxEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return self._box_data.online
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        # Lets the card fetch a real product photo from Tonies' own CDN
+        # (https://cdn.tonies.de/thumbnails/<box_model>-i.png), the same
+        # approach teddyCloud's own web UI uses.
+        return {"box_model": self._box_data.box.get("boxModel")}
