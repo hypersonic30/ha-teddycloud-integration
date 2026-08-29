@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to TeddyCloud",
+        "description": "Enter the connection details for your teddyCloud server.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "host": "The hostname or IP address of your teddyCloud server, e.g. 192.168.1.10",
+          "port": "The teddyCloud HTTP API port — usually 7780, NOT the HTTPS web UI or Toniebox cloud-emulation port",
+          "ssl": "Enable only if teddyCloud's API is served over HTTPS on the port above",
+          "verify_ssl": "Disable only if teddyCloud uses a self-signed certificate"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure TeddyCloud",
+        "description": "Update the connection details for your teddyCloud server.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to teddyCloud at that host/port",
+      "timeout": "Connecting to teddyCloud timed out",
+      "ssl_error": "SSL certificate validation failed — disable 'Verify SSL certificate' if teddyCloud uses a self-signed certificate"
+    },
+    "abort": {
+      "reconfigure_successful": "TeddyCloud connection details updated successfully",
+      "already_configured": "This teddyCloud server is already configured"
+    }
+  }
+}

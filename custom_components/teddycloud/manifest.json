@@ -1,0 +1,13 @@
+{
+  "domain": "teddycloud",
+  "name": "TeddyCloud",
+  "codeowners": ["@hypersonic30"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/hypersonic30/ha-teddycloud-integration",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/hypersonic30/ha-teddycloud-integration/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
