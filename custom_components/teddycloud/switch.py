@@ -47,7 +47,10 @@ class TeddyCloudSettingSwitch(TeddyCloudBoxEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        return bool(self._box_data.settings.get(self._setting_key))
+        # getIndex returns real JSON booleans (verified live) — compare with
+        # `is True` rather than truthiness so a stray non-bool value reads as
+        # off instead of silently reading as on.
+        return self._box_data.settings.get(self._setting_key) is True
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._async_set(True)

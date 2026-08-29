@@ -10,7 +10,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant
 
-from .api import TeddyCloudApiClient, TeddyCloudApiError
+from .api import TeddyCloudApiClient, TeddyCloudApiError, build_base_url
 from .const import (
     CONF_HOST,
     CONF_PORT,
@@ -39,14 +39,9 @@ def _schema(defaults: dict) -> vol.Schema:
     )
 
 
-def _base_url(host: str, port: int, ssl: bool) -> str:
-    scheme = "https" if ssl else "http"
-    return f"{scheme}://{host}:{port}"
-
-
 async def _test_connection(hass: HomeAssistant, user_input: dict) -> str | None:
     """Try to reach /api/getBoxes. Returns an error key, or None on success."""
-    url = _base_url(user_input[CONF_HOST], user_input[CONF_PORT], user_input[CONF_SSL])
+    url = build_base_url(user_input[CONF_HOST], user_input[CONF_PORT], user_input[CONF_SSL])
     client = TeddyCloudApiClient(hass, url, verify_ssl=user_input[CONF_VERIFY_SSL])
     try:
         await client.get_boxes()
@@ -95,10 +90,15 @@ class TeddyCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         defaults = {**reconfigure_entry.data, **(user_input or {})}
 
         if user_input is not None:
+            new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
+            await self.async_set_unique_id(new_unique_id)
+            self._abort_if_unique_id_configured()
+
             error_key = await _test_connection(self.hass, user_input)
             if error_key is None:
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
+                    unique_id=new_unique_id,
                     title=f"TeddyCloud ({user_input[CONF_HOST]})",
                     data=user_input,
                 )

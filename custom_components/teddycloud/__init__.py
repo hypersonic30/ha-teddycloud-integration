@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .api import TeddyCloudApiClient
+from .api import TeddyCloudApiClient, build_base_url
 from .const import CONF_HOST, CONF_PORT, CONF_SSL, CONF_VERIFY_SSL, DOMAIN
 from .coordinator import TeddyCloudCoordinator
 
@@ -13,9 +13,7 @@ PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    scheme = "https" if entry.data[CONF_SSL] else "http"
-    base_url = f"{scheme}://{entry.data[CONF_HOST]}:{entry.data[CONF_PORT]}"
-
+    base_url = build_base_url(entry.data[CONF_HOST], entry.data[CONF_PORT], entry.data[CONF_SSL])
     client = TeddyCloudApiClient(hass, base_url, verify_ssl=entry.data[CONF_VERIFY_SSL])
     coordinator = TeddyCloudCoordinator(hass, client)
     await coordinator.async_config_entry_first_refresh()

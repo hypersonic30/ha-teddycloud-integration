@@ -27,6 +27,12 @@ class TeddyCloudApiError(Exception):
     """Raised when a teddyCloud server can't be reached or returns an error."""
 
 
+def build_base_url(host: str, port: int, ssl: bool) -> str:
+    """Build the base URL for a teddyCloud server from its config entry fields."""
+    scheme = "https" if ssl else "http"
+    return f"{scheme}://{host}:{port}"
+
+
 class TeddyCloudApiClient:
     """Thin async wrapper around the teddyCloud REST API."""
 

@@ -61,13 +61,35 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
         self.boxes: list[dict] = []
 
     async def _async_update_data(self) -> dict[str, TeddyCloudBoxData]:
-        try:
-            if not self.boxes:
+        if not self.boxes:
+            try:
                 self.boxes = await self.client.get_boxes()
-            results = await asyncio.gather(*(self._update_box(box) for box in self.boxes))
-        except TeddyCloudApiError as err:
-            raise UpdateFailed(str(err)) from err
-        return {box["ID"]: data for box, data in zip(self.boxes, results)}
+            except TeddyCloudApiError as err:
+                raise UpdateFailed(str(err)) from err
+
+        results = await asyncio.gather(
+            *(self._update_box(box) for box in self.boxes), return_exceptions=True
+        )
+
+        # A single box's transient API failure shouldn't take every other
+        # box's entities down too — fall back to that box's last-known-good
+        # data (if any) instead of failing the whole refresh.
+        previous = self.data or {}
+        data: dict[str, TeddyCloudBoxData] = {}
+        for box, result in zip(self.boxes, results):
+            box_id = box["ID"]
+            if isinstance(result, TeddyCloudApiError):
+                _LOGGER.warning("teddycloud: failed to update box %s: %s", box_id, result)
+                if box_id in previous:
+                    data[box_id] = previous[box_id]
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            data[box_id] = result
+
+        if not data:
+            raise UpdateFailed("Failed to update any box")
+        return data
 
     async def _update_box(self, box: dict) -> TeddyCloudBoxData:
         box_id = box["ID"]
