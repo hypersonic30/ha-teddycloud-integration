@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 import logging
 
@@ -33,6 +33,10 @@ class TeddyCloudBoxData:
     ip: str
     last_ruid: str
     tonie_info: dict | None
+    # False when this snapshot is carried over from a previous refresh
+    # because this box's fetch failed this round — lets entities report
+    # unavailable instead of silently showing stale data forever.
+    available: bool = True
 
 
 def _parse_bool(text: str) -> bool:
@@ -67,28 +71,34 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
             except TeddyCloudApiError as err:
                 raise UpdateFailed(str(err)) from err
 
+        # Entities are only ever created once, from whatever this method
+        # returns on the *first* successful refresh — a box missing here
+        # would never get entities until a manual reload. So on the first
+        # refresh, any box failing fails the whole thing (HA retries entry
+        # setup for everyone, same as before per-box isolation existed).
+        # Once entities exist, isolate failures per box instead, so one
+        # flaky box doesn't take every other box's entities down with it.
+        is_first_refresh = self.data is None
+
         results = await asyncio.gather(
             *(self._update_box(box) for box in self.boxes), return_exceptions=True
         )
 
-        # A single box's transient API failure shouldn't take every other
-        # box's entities down too — fall back to that box's last-known-good
-        # data (if any) instead of failing the whole refresh.
         previous = self.data or {}
         data: dict[str, TeddyCloudBoxData] = {}
         for box, result in zip(self.boxes, results):
             box_id = box["ID"]
             if isinstance(result, TeddyCloudApiError):
+                if is_first_refresh:
+                    raise UpdateFailed(f"Failed to reach box {box_id}: {result}")
                 _LOGGER.warning("teddycloud: failed to update box %s: %s", box_id, result)
                 if box_id in previous:
-                    data[box_id] = previous[box_id]
+                    data[box_id] = replace(previous[box_id], available=False)
                 continue
             if isinstance(result, BaseException):
                 raise result
             data[box_id] = result
 
-        if not data:
-            raise UpdateFailed("Failed to update any box")
         return data
 
     async def _update_box(self, box: dict) -> TeddyCloudBoxData:

@@ -27,3 +27,11 @@ class TeddyCloudBoxEntity(CoordinatorEntity[TeddyCloudCoordinator]):
     @property
     def _box_data(self) -> TeddyCloudBoxData:
         return self.coordinator.data[self._box_id]
+
+    @property
+    def available(self) -> bool:
+        # The base CoordinatorEntity only tracks one success flag for the
+        # whole coordinator, which stays True as long as any box is
+        # reachable — this box specifically may be carrying forward stale
+        # data because its own fetch failed this round.
+        return super().available and self._box_data.available

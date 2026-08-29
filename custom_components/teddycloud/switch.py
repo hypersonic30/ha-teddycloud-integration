@@ -1,6 +1,7 @@
 """Switches for the TeddyCloud integration."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -17,6 +18,8 @@ from .const import (
 )
 from .coordinator import TeddyCloudCoordinator
 from .entity import TeddyCloudBoxEntity
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -47,10 +50,18 @@ class TeddyCloudSettingSwitch(TeddyCloudBoxEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        # getIndex returns real JSON booleans (verified live) — compare with
-        # `is True` rather than truthiness so a stray non-bool value reads as
-        # off instead of silently reading as on.
-        return self._box_data.settings.get(self._setting_key) is True
+        # getIndex returns real JSON booleans (verified live). Compare with
+        # `is True`/`is False` rather than truthiness so a value that's ever
+        # neither doesn't get silently misread — and log it, since defaulting
+        # to "off" in that case is otherwise indistinguishable from a real off.
+        value = self._box_data.settings.get(self._setting_key)
+        if isinstance(value, bool):
+            return value
+        _LOGGER.warning(
+            "teddycloud: expected a bool for %s, got %r — treating as off",
+            self._setting_key, value,
+        )
+        return False
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._async_set(True)
