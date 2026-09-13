@@ -11,6 +11,7 @@ from .const import CONF_HOST, CONF_PORT, CONF_SIDECAR_URL, CONF_SSL, CONF_VERIFY
 from .coordinator import TeddyCloudCoordinator
 from .services import async_register_services
 from .sidecar_api import SidecarApiClient
+from .stream_view import TeddyCloudStreamView
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.SELECT]
 
@@ -19,6 +20,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_register_services(hass)
+    hass.http.register_view(TeddyCloudStreamView())
     return True
 
 
@@ -29,7 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sidecar_url = entry.data.get(CONF_SIDECAR_URL)
     sidecar_client = SidecarApiClient(hass, sidecar_url) if sidecar_url else None
 
-    coordinator = TeddyCloudCoordinator(hass, client, sidecar_client)
+    coordinator = TeddyCloudCoordinator(hass, client, entry.entry_id, sidecar_client)
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

@@ -116,3 +116,20 @@ class TeddyCloudApiClient:
     def build_url(self, path: str) -> str:
         """Turn a server-relative path from an API response into an absolute URL."""
         return f"{self._base_url}{path}"
+
+    def open_content_stream(self, ruid: str, overlay: str, range_header: str | None):
+        """Open a streaming GET to teddyCloud's own content endpoint.
+
+        Returns an aiohttp request context manager — the caller enters it
+        (`async with`) and streams `.content` itself; this deliberately
+        doesn't await or buffer the body. No total timeout: an audio stream
+        can run far longer than a normal API call.
+        """
+        url = self.build_url(f"/content/download/{ruid[0:8].upper()}/{ruid[8:16].upper()}")
+        headers = {"Range": range_header} if range_header else {}
+        return self._session.get(
+            url,
+            params={"overlay": overlay, "skip_header": "true"},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=None, sock_connect=REQUEST_TIMEOUT),
+        )

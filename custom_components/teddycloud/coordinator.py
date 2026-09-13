@@ -51,24 +51,32 @@ def _parse_int(text: str) -> int | None:
     return int(text) if text.lstrip("-").isdigit() else None
 
 
-def _build_library(tags: list[dict], client: TeddyCloudApiClient) -> list[dict]:
-    """Cached, playable tags only — skips system tags and ones still downloading."""
+def _build_library(tags: list[dict], entry_id: str, box_id: str) -> list[dict]:
+    """Cached, playable tags only — skips system tags and ones still downloading.
+
+    audio_url points at this integration's own stream_view proxy rather
+    than straight at teddyCloud — a relative path, so the browser resolves
+    it against whatever host it's already using to reach HA (no guessing
+    HA's own URL server-side), and it fixes teddyCloud's generic
+    Content-Type so playback targets that fetch it independently (e.g. an
+    AirPlay receiver) know it's Ogg/Opus audio too.
+    """
     library = []
     for tag in tags:
         if tag.get("type") != "tag" or not tag.get("valid") or not tag.get("exists"):
             continue
-        audio_path = tag.get("audioUrl")
-        if not audio_path:
+        ruid = tag.get("ruid")
+        if not ruid:
             continue
         info = tag.get("tonieInfo") or {}
-        title = info.get("episode") or info.get("series") or tag.get("ruid")
+        title = info.get("episode") or info.get("series") or ruid
         library.append(
             {
-                "ruid": tag.get("ruid"),
+                "ruid": ruid,
                 "title": title,
                 "series": info.get("series") or None,
                 "picture": info.get("picture"),
-                "audio_url": client.build_url(audio_path),
+                "audio_url": f"/api/teddycloud/stream/{entry_id}/{box_id}/{ruid}",
             }
         )
     library.sort(key=lambda item: (item["title"] or "").lower())
@@ -82,6 +90,7 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
         self,
         hass: HomeAssistant,
         client: TeddyCloudApiClient,
+        entry_id: str,
         sidecar_client: SidecarApiClient | None = None,
     ) -> None:
         super().__init__(
@@ -91,6 +100,7 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
         )
         self.client = client
+        self.entry_id = entry_id
         # Only set when this entry has a teddycloud-nfc-bridge sidecar URL
         # configured — lets the assign_nfc_tag service work per-entry.
         self.sidecar_client = sidecar_client
@@ -157,5 +167,5 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
             ip=ip,
             last_ruid=last_ruid,
             tonie_info=tonie_info,
-            library=_build_library(tag_index, self.client),
+            library=_build_library(tag_index, self.entry_id, box_id),
         )

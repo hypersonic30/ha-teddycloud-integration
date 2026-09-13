@@ -57,7 +57,7 @@ TeddyCloud → the device → any entity, same as any other HA integration.
 | Last IP | sensor | `internal.ip` |
 | Current Tonie | sensor (+ cover as `entity_picture`) | `internal.last_ruid` → `getTagInfo` |
 | Current Tonie Series | sensor | `internal.last_ruid` → `getTagInfo` |
-| Tonie Library | sensor (count + full list as attribute) | `getTagIndex` |
+| Tonie Library | sensor (count + full list w/ stream URLs as attribute) | `getTagIndex` |
 | Cloud Enabled | switch | `cloud.enabled` |
 | Cache Content | switch | `cloud.cacheContent` |
 | Slap To Skip | switch | `toniebox.slap_enabled` |
@@ -67,6 +67,23 @@ TeddyCloud → the device → any entity, same as any other HA integration.
 | LED Mode | select (on/off/dimmed) | `toniebox.led` |
 
 Polling runs every 20 seconds.
+
+## Audio streaming proxy
+
+The Tonie Library sensor's audio URLs point at this integration's own
+`/api/teddycloud/stream/...` endpoint rather than straight at teddyCloud. It
+proxies the same bytes teddyCloud itself serves, only correcting the
+`Content-Type` header (teddyCloud sends a generic one, which browsers ignore
+in favor of the ha-teddycloud-card's own type hint, but which breaks
+playback for anything that fetches the stream on its own — e.g. AirPlay to
+a device on your local network). Nothing is buffered or stored: it's a
+pure pass-through, streamed live, per request.
+
+This endpoint deliberately doesn't require a Home Assistant login — the
+same trust model as teddyCloud's own (also unauthenticated) download
+endpoint it forwards to, and necessary since a playback target like an
+AirPlay receiver has no HA session of its own. It only ever proxies to the
+teddyCloud server configured for that config entry.
 
 ## Known limitations (by design, not a bug)
 
