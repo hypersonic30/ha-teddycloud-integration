@@ -25,6 +25,7 @@ async def async_setup_entry(
                 TeddyCloudLastIpSensor(coordinator, box_id),
                 TeddyCloudCurrentTonieSensor(coordinator, box_id),
                 TeddyCloudCurrentTonieSeriesSensor(coordinator, box_id),
+                TeddyCloudTonieLibrarySensor(coordinator, box_id),
             ]
         )
     async_add_entities(entities)
@@ -122,3 +123,30 @@ class TeddyCloudCurrentTonieSeriesSensor(TeddyCloudBoxEntity, SensorEntity):
         tag_info = self._box_data.tonie_info
         info = tag_info.get("tonieInfo") if tag_info else None
         return info.get("series") if info else None
+
+
+class TeddyCloudTonieLibrarySensor(TeddyCloudBoxEntity, SensorEntity):
+    """Cached, playable Tonies for this box — a UI-facing library listing.
+
+    The full list (title/cover/audio stream URL per Tonie) lives in
+    extra_state_attributes rather than a dedicated media_player, since
+    there's no real "device" for HA to cast playback to — see the
+    ha-teddycloud-card's Tonie Library feature, which plays these audio_url
+    values directly via HTML5 <audio> in the browser viewing the dashboard.
+    """
+
+    _attr_name = "Tonie Library"
+    _attr_icon = "mdi:bookshelf"
+    _attr_native_unit_of_measurement = "tonies"
+
+    def __init__(self, coordinator: TeddyCloudCoordinator, box_id: str) -> None:
+        super().__init__(coordinator, box_id)
+        self._attr_unique_id = f"{box_id}_tonie_library"
+
+    @property
+    def native_value(self) -> int:
+        return len(self._box_data.library)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"tonies": self._box_data.library}

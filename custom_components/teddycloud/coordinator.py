@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 import logging
 
@@ -34,6 +34,8 @@ class TeddyCloudBoxData:
     ip: str
     last_ruid: str
     tonie_info: dict | None
+    # Cached, playable tags for this box — see _build_library().
+    library: list[dict] = field(default_factory=list)
     # False when this snapshot is carried over from a previous refresh
     # because this box's fetch failed this round — lets entities report
     # unavailable instead of silently showing stale data forever.
@@ -47,6 +49,30 @@ def _parse_bool(text: str) -> bool:
 def _parse_int(text: str) -> int | None:
     text = text.strip()
     return int(text) if text.lstrip("-").isdigit() else None
+
+
+def _build_library(tags: list[dict], client: TeddyCloudApiClient) -> list[dict]:
+    """Cached, playable tags only — skips system tags and ones still downloading."""
+    library = []
+    for tag in tags:
+        if tag.get("type") != "tag" or not tag.get("valid") or not tag.get("exists"):
+            continue
+        audio_path = tag.get("audioUrl")
+        if not audio_path:
+            continue
+        info = tag.get("tonieInfo") or {}
+        title = info.get("episode") or info.get("series") or tag.get("ruid")
+        library.append(
+            {
+                "ruid": tag.get("ruid"),
+                "title": title,
+                "series": info.get("series") or None,
+                "picture": info.get("picture"),
+                "audio_url": client.build_url(audio_path),
+            }
+        )
+    library.sort(key=lambda item: (item["title"] or "").lower())
+    return library
 
 
 class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]]):
@@ -112,12 +138,13 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
 
     async def _update_box(self, box: dict) -> TeddyCloudBoxData:
         box_id = box["ID"]
-        settings, online_text, last_connection_text, last_ruid, ip = await asyncio.gather(
+        settings, online_text, last_connection_text, last_ruid, ip, tag_index = await asyncio.gather(
             self.client.get_settings_index(box_id),
             self.client.get_setting(SETTING_ONLINE, box_id),
             self.client.get_setting(SETTING_LAST_CONNECTION, box_id),
             self.client.get_setting(SETTING_LAST_RUID, box_id),
             self.client.get_setting(SETTING_IP, box_id),
+            self.client.get_tag_index(box_id),
         )
 
         tonie_info = await self.client.get_tag_info(last_ruid, box_id)
@@ -130,4 +157,5 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
             ip=ip,
             last_ruid=last_ruid,
             tonie_info=tonie_info,
+            library=_build_library(tag_index, self.client),
         )

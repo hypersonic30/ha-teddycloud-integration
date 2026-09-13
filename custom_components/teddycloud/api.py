@@ -103,3 +103,16 @@ class TeddyCloudApiClient:
             _LOGGER.debug("teddycloud: getTagInfo failed for ruid %s: %s", ruid, err)
             return None
         return data.get("tagInfo")
+
+    async def get_tag_index(self, overlay: str) -> list[dict]:
+        """Return every cached tag for this box, or [] if unavailable."""
+        try:
+            data = await self._get_json("/api/getTagIndex", params={"overlay": overlay})
+        except TeddyCloudApiError as err:
+            _LOGGER.debug("teddycloud: getTagIndex failed for overlay %s: %s", overlay, err)
+            return []
+        return data.get("tags", [])
+
+    def build_url(self, path: str) -> str:
+        """Turn a server-relative path from an API response into an absolute URL."""
+        return f"{self._base_url}{path}"

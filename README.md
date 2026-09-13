@@ -57,6 +57,7 @@ TeddyCloud → the device → any entity, same as any other HA integration.
 | Last IP | sensor | `internal.ip` |
 | Current Tonie | sensor (+ cover as `entity_picture`) | `internal.last_ruid` → `getTagInfo` |
 | Current Tonie Series | sensor | `internal.last_ruid` → `getTagInfo` |
+| Tonie Library | sensor (count + full list as attribute) | `getTagIndex` |
 | Cloud Enabled | switch | `cloud.enabled` |
 | Cache Content | switch | `cloud.cacheContent` |
 | Slap To Skip | switch | `toniebox.slap_enabled` |
