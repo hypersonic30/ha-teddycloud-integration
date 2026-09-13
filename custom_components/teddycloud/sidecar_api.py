@@ -28,7 +28,10 @@ class SidecarApiClient:
 
     def __init__(self, hass: HomeAssistant, base_url: str) -> None:
         self._hass = hass
-        self._base_url = base_url.rstrip("/")
+        base_url = base_url.rstrip("/")
+        if "://" not in base_url:
+            base_url = f"http://{base_url}"
+        self._base_url = base_url
 
     @property
     def _session(self) -> aiohttp.ClientSession:
