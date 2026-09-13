@@ -46,6 +46,10 @@
       "name": "Assign NFC tag",
       "description": "Uploads a Tonie .nfc dump to the configured nfc-bridge sidecar, which caches the content on teddyCloud and triggers the download.",
       "fields": {
+        "device_id": {
+          "name": "Box",
+          "description": "The TeddyCloud box to assign this Tonie to."
+        },
         "file": {
           "name": "NFC file",
           "description": "The .nfc dump (Flipper Zero format) of the Tonie figure to assign to this box."

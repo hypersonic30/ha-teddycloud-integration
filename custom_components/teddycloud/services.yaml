@@ -1,7 +1,12 @@
 assign_nfc_tag:
-  target:
-    device:
   fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          multiple: true
+          filter:
+            integration: teddycloud
     file:
       required: true
       selector:

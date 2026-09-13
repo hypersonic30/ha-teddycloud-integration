@@ -46,6 +46,10 @@
       "name": "NFC-Tag zuweisen",
       "description": "Lädt einen Tonie-.nfc-Dump zum konfigurierten nfc-bridge-Sidecar hoch, der den Inhalt bei teddyCloud cacht und den Download antriggert.",
       "fields": {
+        "device_id": {
+          "name": "Box",
+          "description": "Die TeddyCloud-Box, der diese Tonie-Figur zugewiesen werden soll."
+        },
         "file": {
           "name": "NFC-Datei",
           "description": "Der .nfc-Dump (Flipper-Zero-Format) der Tonie-Figur, die dieser Box zugewiesen werden soll."
