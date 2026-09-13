@@ -4,6 +4,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from .api import TeddyCloudApiClient, build_base_url
 from .const import CONF_HOST, CONF_PORT, CONF_SIDECAR_URL, CONF_SSL, CONF_VERIFY_SSL, DOMAIN
@@ -12,6 +13,8 @@ from .services import async_register_services
 from .sidecar_api import SidecarApiClient
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.SELECT]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
