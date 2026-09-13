@@ -8,13 +8,15 @@
           "host": "Host",
           "port": "Port",
           "ssl": "HTTPS verwenden",
-          "verify_ssl": "SSL-Zertifikat prüfen"
+          "verify_ssl": "SSL-Zertifikat prüfen",
+          "sidecar_url": "NFC-Bridge-Sidecar-URL (optional)"
         },
         "data_description": {
           "host": "Hostname oder IP-Adresse deines teddyCloud-Servers, z. B. 192.168.1.10",
           "port": "Der HTTP-API-Port von teddyCloud — meist 7780, NICHT der HTTPS-Web-UI- oder Toniebox-Cloud-Emulations-Port",
           "ssl": "Nur aktivieren, wenn die teddyCloud-API auf dem obigen Port über HTTPS läuft",
-          "verify_ssl": "Nur deaktivieren, wenn teddyCloud ein selbstsigniertes Zertifikat verwendet"
+          "verify_ssl": "Nur deaktivieren, wenn teddyCloud ein selbstsigniertes Zertifikat verwendet",
+          "sidecar_url": "Basis-URL einer teddycloud-nfc-bridge-Instanz, z. B. http://192.168.1.10:8000. Leer lassen, um den Dienst assign_nfc_tag nicht zu nutzen."
         }
       },
       "reconfigure": {
@@ -24,7 +26,8 @@
           "host": "Host",
           "port": "Port",
           "ssl": "HTTPS verwenden",
-          "verify_ssl": "SSL-Zertifikat prüfen"
+          "verify_ssl": "SSL-Zertifikat prüfen",
+          "sidecar_url": "NFC-Bridge-Sidecar-URL (optional)"
         }
       }
     },
@@ -36,6 +39,18 @@
     "abort": {
       "reconfigure_successful": "Verbindungsdaten für TeddyCloud erfolgreich aktualisiert",
       "already_configured": "Dieser teddyCloud-Server ist bereits eingerichtet"
+    }
+  },
+  "services": {
+    "assign_nfc_tag": {
+      "name": "NFC-Tag zuweisen",
+      "description": "Lädt einen Tonie-.nfc-Dump zum konfigurierten nfc-bridge-Sidecar hoch, der den Inhalt bei teddyCloud cacht und den Download antriggert.",
+      "fields": {
+        "file": {
+          "name": "NFC-Datei",
+          "description": "Der .nfc-Dump (Flipper-Zero-Format) der Tonie-Figur, die dieser Box zugewiesen werden soll."
+        }
+      }
     }
   }
 }

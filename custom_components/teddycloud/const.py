@@ -6,6 +6,10 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_SSL = "ssl"
 CONF_VERIFY_SSL = "verify_ssl"
+# Base URL of an optional teddycloud-nfc-bridge sidecar (see
+# https://github.com/hypersonic30/teddycloud-nfc-bridge). Empty string means
+# the assign_nfc_tag service is unavailable for this entry.
+CONF_SIDECAR_URL = "sidecar_url"
 
 DEFAULT_PORT = 7780
 DEFAULT_SSL = False

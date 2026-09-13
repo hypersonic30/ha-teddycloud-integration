@@ -8,13 +8,15 @@
           "host": "Host",
           "port": "Port",
           "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate"
+          "verify_ssl": "Verify SSL certificate",
+          "sidecar_url": "NFC-bridge sidecar URL (optional)"
         },
         "data_description": {
           "host": "The hostname or IP address of your teddyCloud server, e.g. 192.168.1.10",
           "port": "The teddyCloud HTTP API port — usually 7780, NOT the HTTPS web UI or Toniebox cloud-emulation port",
           "ssl": "Enable only if teddyCloud's API is served over HTTPS on the port above",
-          "verify_ssl": "Disable only if teddyCloud uses a self-signed certificate"
+          "verify_ssl": "Disable only if teddyCloud uses a self-signed certificate",
+          "sidecar_url": "Base URL of a teddycloud-nfc-bridge instance, e.g. http://192.168.1.10:8000. Leave empty to skip the assign_nfc_tag service."
         }
       },
       "reconfigure": {
@@ -24,7 +26,8 @@
           "host": "Host",
           "port": "Port",
           "ssl": "Use HTTPS",
-          "verify_ssl": "Verify SSL certificate"
+          "verify_ssl": "Verify SSL certificate",
+          "sidecar_url": "NFC-bridge sidecar URL (optional)"
         }
       }
     },
@@ -36,6 +39,18 @@
     "abort": {
       "reconfigure_successful": "TeddyCloud connection details updated successfully",
       "already_configured": "This teddyCloud server is already configured"
+    }
+  },
+  "services": {
+    "assign_nfc_tag": {
+      "name": "Assign NFC tag",
+      "description": "Uploads a Tonie .nfc dump to the configured nfc-bridge sidecar, which caches the content on teddyCloud and triggers the download.",
+      "fields": {
+        "file": {
+          "name": "NFC file",
+          "description": "The .nfc dump (Flipper Zero format) of the Tonie figure to assign to this box."
+        }
+      }
     }
   }
 }

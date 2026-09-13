@@ -14,6 +14,7 @@ from .api import TeddyCloudApiClient, TeddyCloudApiError, build_base_url
 from .const import (
     CONF_HOST,
     CONF_PORT,
+    CONF_SIDECAR_URL,
     CONF_SSL,
     CONF_VERIFY_SSL,
     DEFAULT_PORT,
@@ -35,6 +36,10 @@ def _schema(defaults: dict) -> vol.Schema:
                 CONF_VERIFY_SSL,
                 default=defaults.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
             ): bool,
+            vol.Optional(
+                CONF_SIDECAR_URL,
+                default=defaults.get(CONF_SIDECAR_URL, ""),
+            ): str,
         }
     )
 

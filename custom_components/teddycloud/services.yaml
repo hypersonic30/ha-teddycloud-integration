@@ -1,0 +1,10 @@
+assign_nfc_tag:
+  target:
+    device:
+      integration: teddycloud
+  fields:
+    file:
+      required: true
+      selector:
+        file:
+          accept: ".nfc"

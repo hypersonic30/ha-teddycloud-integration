@@ -18,6 +18,7 @@ from .const import (
     SETTING_ONLINE,
     UPDATE_INTERVAL,
 )
+from .sidecar_api import SidecarApiClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +52,12 @@ def _parse_int(text: str) -> int | None:
 class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]]):
     """Polls a teddyCloud server for box status and settings."""
 
-    def __init__(self, hass: HomeAssistant, client: TeddyCloudApiClient) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: TeddyCloudApiClient,
+        sidecar_client: SidecarApiClient | None = None,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -59,6 +65,9 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
         )
         self.client = client
+        # Only set when this entry has a teddycloud-nfc-bridge sidecar URL
+        # configured — lets the assign_nfc_tag service work per-entry.
+        self.sidecar_client = sidecar_client
         # Boxes are discovered once on first refresh. A box added to the
         # teddyCloud server later requires reloading the config entry (or
         # restarting HA) to pick up — acceptable for how rarely that happens.
