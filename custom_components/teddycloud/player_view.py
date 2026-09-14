@@ -34,6 +34,10 @@ class TeddyCloudPlayerView(HomeAssistantView):
 
     url = "/api/teddycloud/player/{entry_id}/{overlay}/{ruid}"
     name = "api:teddycloud:player"
+    # HA's browser auth is token-based, attached by frontend JS to fetch/XHR
+    # calls — a plain navigation like window.open() carries none of that,
+    # same reasoning as TeddyCloudStreamView (which this page just embeds).
+    requires_auth = False
 
     async def get(
         self, request: web.Request, entry_id: str, overlay: str, ruid: str
