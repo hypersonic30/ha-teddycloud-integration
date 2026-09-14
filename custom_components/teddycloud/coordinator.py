@@ -77,6 +77,12 @@ def _build_library(tags: list[dict], entry_id: str, box_id: str) -> list[dict]:
                 "series": info.get("series") or None,
                 "picture": info.get("picture"),
                 "audio_url": f"/api/teddycloud/stream/{entry_id}/{box_id}/{ruid}",
+                # A standalone player page (see player_view.py), meant to be
+                # opened in its own tab rather than played inline: a full HA
+                # dashboard is a heavy, actively-networking page, and iOS is
+                # far more willing to keep a bare, single-purpose audio page
+                # alive in the background than a whole SPA.
+                "player_url": f"/api/teddycloud/player/{entry_id}/{box_id}/{ruid}",
             }
         )
     library.sort(key=lambda item: (item["title"] or "").lower())

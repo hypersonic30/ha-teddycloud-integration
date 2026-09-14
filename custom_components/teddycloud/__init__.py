@@ -10,6 +10,7 @@ from .api import TeddyCloudApiClient, build_base_url
 from .const import CONF_HOST, CONF_PORT, CONF_SIDECAR_URL, CONF_SSL, CONF_VERIFY_SSL, DOMAIN
 from .coordinator import TeddyCloudCoordinator
 from .services import async_register_services
+from .player_view import TeddyCloudPlayerView
 from .sidecar_api import SidecarApiClient
 from .stream_view import TeddyCloudStreamView
 
@@ -21,6 +22,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_register_services(hass)
     hass.http.register_view(TeddyCloudStreamView())
+    hass.http.register_view(TeddyCloudPlayerView())
     return True
 
 

@@ -85,6 +85,18 @@ endpoint it forwards to, and necessary since a playback target like an
 AirPlay receiver has no HA session of its own. It only ever proxies to the
 teddyCloud server configured for that config entry.
 
+## Standalone player page
+
+Each Tonie Library entry also carries a `player_url`
+(`/api/teddycloud/player/<entry_id>/<box>/<ruid>`) alongside `audio_url` — a
+minimal, self-contained HTML page (cover art, title, an `<audio>` element
+pointed at the stream proxy above, and just enough JS to register the
+[Media Session API](https://developer.mozilla.org/en-US/docs/Web/API/Media_Session_API)
+for lock-screen controls) meant to be opened in its own browser tab. The
+ha-teddycloud-card uses this rather than playing inline, since a full HA
+dashboard is a heavy, actively-networking page that iOS is much less
+willing to keep alive in the background than a bare, single-purpose one.
+
 ## Known limitations (by design, not a bug)
 
 teddyCloud/the Toniebox protocol simply doesn't expose these, so they aren't built:
