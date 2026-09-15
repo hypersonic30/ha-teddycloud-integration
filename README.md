@@ -149,9 +149,26 @@ and the browser-side MediaSource/SourceBuffer playback have both been
 verified against a real ffmpeg binary and a real Chromium instance — real
 audio genuinely plays back progressively, not just in theory — and the
 WebM+Opus combination has since been confirmed supported on real iOS
-hardware via the player page's own diagnostics line. What's *not* yet
-confirmed: full end-to-end playback (not just capability detection) on
-real iOS Safari specifically, and how `ManagedMediaSource`'s OS-driven
+hardware via the player page's own diagnostics line.
+
+Appending has to be throttled and chunked to avoid `QuotaExceededError`,
+confirmed on real iOS hardware in two distinct ways: first, appending as
+fast as data arrives overruns `SourceBuffer`'s memory quota outright
+(fixed with a buffered-ahead cap). Second — found only after that fix,
+via failure diagnostics captured on a real device — a *single*
+`reader.read()` call from `fetch()` can itself return a chunk of several
+megabytes (observed: ~18.5MB in one call) regardless of how the read loop
+is paced, since the network layer buffers under the hood; appending that
+whole chunk in one `appendBuffer()` call blew the quota even with
+throttling in place between reads. Fixed by slicing every chunk into
+64KB pieces before appending, re-checking buffer space between slices —
+verified locally by forcing `fetch()` to hand back an entire ~1.7MB test
+file as one chunk under a simulated low quota, confirming playback
+proceeds via many small appends instead of failing on the big one.
+
+What's *not* yet confirmed: full end-to-end playback (not just capability
+detection, and not just the chunking fix in isolation) on real iOS Safari
+over a real network connection, and how `ManagedMediaSource`'s OS-driven
 buffer eviction under memory pressure behaves in practice.
 
 ## Known limitations (by design, not a bug)

@@ -251,11 +251,18 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       // theoretical - hit this on real hardware, twice: once with no
       // throttling at all, and again with a 60-second-ahead cap that was
       // still too generous for whatever ManagedMediaSource actually
-      // allows on iOS). Down to a much smaller cap this time, and
-      // capturing the buffered-ahead amount and chunk/total sizes at the
-      // moment of failure so a third attempt (if needed) has real numbers
-      // to go on instead of another guess.
+      // allows on iOS). The failure diagnostics from that second attempt
+      // (bufferedAhead=4.9s, chunk=18523602B) proved throttling *between*
+      // reads can't be the whole story: fetch()'s reader.read() itself
+      // handed back an ~18.5MB chunk in one call - the network layer
+      // buffers under the hood regardless of how slowly this loop
+      // consumes it, so a single appendBuffer() call can still blow the
+      // quota no matter how well-timed the reads are. Fixed by capping
+      // the size of any *individual* appendBuffer() call, slicing each
+      // read() result into pieces and re-checking buffer space between
+      // slices, not just between reads.
       const MAX_BUFFER_AHEAD_SECONDS = 5;
+      const MAX_APPEND_BYTES = 65536;
       let totalAppended = 0;
       const bufferedAheadSeconds = () => {{
         if (sourceBuffer.buffered.length === 0) return 0;
@@ -304,14 +311,21 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
 
       let started = false;
       while (true) {{
-        await waitForBufferSpace();
         const {{ done, value }} = await reader.read();
         if (done) break;
-        await appendChunk(value);
-        if (!started) {{
-          started = true;
-          statusEl.style.display = "none";
-          audio.play();
+        // Slice unconditionally, even when value is already small: it
+        // keeps every appendBuffer() call the same predictable size
+        // regardless of how the network/fetch layer happened to batch
+        // this particular read().
+        for (let offset = 0; offset < value.length; offset += MAX_APPEND_BYTES) {{
+          const slice = value.subarray(offset, offset + MAX_APPEND_BYTES);
+          await waitForBufferSpace();
+          await appendChunk(slice);
+          if (!started) {{
+            started = true;
+            statusEl.style.display = "none";
+            audio.play();
+          }}
         }}
       }}
       if (mediaSource.readyState === "open") mediaSource.endOfStream();
