@@ -89,13 +89,21 @@ teddyCloud server configured for that config entry.
 
 Each Tonie Library entry also carries a `player_url`
 (`/api/teddycloud/player/<entry_id>/<box>/<ruid>`) alongside `audio_url` — a
-minimal, self-contained HTML page (cover art, title, an `<audio>` element
-pointed at the stream proxy above, and just enough JS to register the
+minimal, self-contained HTML page (cover art, title, and just enough JS to
+register the
 [Media Session API](https://developer.mozilla.org/en-US/docs/Web/API/Media_Session_API)
 for lock-screen controls) meant to be opened in its own browser tab. The
 ha-teddycloud-card uses this rather than playing inline, since a full HA
 dashboard is a heavy, actively-networking page that iOS is much less
 willing to keep alive in the background than a bare, single-purpose one.
+
+Being a bare page alone still wasn't fully reliable in practice — iOS can
+suspend a backgrounded tab's network connections regardless of how little
+else the page is doing, which cuts a live stream off mid-playback. So this
+page downloads the whole file into memory before starting playback at all
+(a wait up front, roughly file size ÷ connection speed) rather than
+streaming it — once loaded, playback needs no network at all, so nothing
+iOS does to the tab's connections in the background can interrupt it.
 
 ## Known limitations (by design, not a bug)
 

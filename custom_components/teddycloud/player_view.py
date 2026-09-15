@@ -9,10 +9,15 @@ moment). A bare, single-purpose page with nothing else going on is a much
 better candidate for iOS to keep alive in the background, the same way a
 podcast episode link reliably keeps playing when Safari is backgrounded.
 
-This page is deliberately tiny: just a cover image, an <audio> element
-pointed at the existing stream_view proxy, and enough JS to register
-Media Session metadata so the lock screen still shows title/cover art and
-play/pause/seek controls.
+Being a bare page alone wasn't enough, though — playback still stopped in
+the background sometimes, since a live stream still depends on an open
+network connection iOS can suspend mid-playback. So this page downloads
+the whole file into memory (via fetch()) before starting playback at all,
+trading a wait up front for playback that needs no network whatsoever
+once started — nothing iOS does to backgrounded connections can interrupt
+it. It's a cover image, an <audio> element played from a local blob: URL,
+and enough JS to register Media Session metadata so the lock screen still
+shows title/cover art and play/pause/seek controls.
 """
 from __future__ import annotations
 
@@ -77,9 +82,9 @@ def _json_for_script(value) -> str:
 def _render(title: str, picture: str | None, stream_url: str) -> str:
     safe_title = html.escape(title)
     safe_picture_attr = html.escape(picture) if picture else None
-    safe_stream_url = html.escape(stream_url)
     js_title = _json_for_script(title)
     js_artwork = _json_for_script([{"src": picture}] if picture else [])
+    js_stream_url = _json_for_script(stream_url)
 
     cover_html = f'<img src="{safe_picture_attr}" alt="">' if safe_picture_attr else ""
 
@@ -99,23 +104,59 @@ def _render(title: str, picture: str | None, stream_url: str) -> str:
   img {{ max-width: min(80vw, 320px); max-height: 45vh; border-radius: 12px; object-fit: contain; }}
   h1 {{ font-size: 1.1rem; font-weight: 500; margin: 0; word-break: break-word; }}
   audio {{ width: min(90vw, 400px); }}
+  #status {{ font-size: 0.9rem; color: #aaa; }}
 </style>
 </head>
 <body>
   {cover_html}
   <h1>{safe_title}</h1>
-  <audio id="a" controls autoplay src="{safe_stream_url}"></audio>
+  <div id="status">Loading…</div>
+  <audio id="a" controls></audio>
   <script>
-    if ("mediaSession" in navigator) {{
-      navigator.mediaSession.metadata = new MediaMetadata({{
-        title: {js_title},
-        artist: "TeddyCloud",
-        artwork: {js_artwork},
-      }});
+    // Downloads the whole file into memory before starting playback,
+    // instead of streaming it live: once loaded, playback needs no network
+    // at all, so nothing iOS does to a backgrounded tab's connections can
+    // interrupt it. Streaming playback kept stopping in the background
+    // even from this same minimal page — this trades a wait up front
+    // (roughly the file size divided by your connection speed) for
+    // eliminating the dependency on an open connection during playback.
+    (async () => {{
+      const statusEl = document.getElementById("status");
       const audio = document.getElementById("a");
-      audio.addEventListener("play", () => {{ navigator.mediaSession.playbackState = "playing"; }});
-      audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
-    }}
+      try {{
+        const resp = await fetch({js_stream_url});
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const total = Number(resp.headers.get("Content-Length")) || 0;
+        const reader = resp.body.getReader();
+        const chunks = [];
+        let received = 0;
+        while (true) {{
+          const {{ done, value }} = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          const mb = (received / 1048576).toFixed(1);
+          statusEl.textContent = total
+            ? `Loading… ${{Math.round((received / total) * 100)}}% (${{mb}} MB)`
+            : `Loading… ${{mb}} MB`;
+        }}
+        audio.src = URL.createObjectURL(new Blob(chunks, {{ type: "audio/ogg" }}));
+        statusEl.style.display = "none";
+        audio.play();
+
+        if ("mediaSession" in navigator) {{
+          navigator.mediaSession.metadata = new MediaMetadata({{
+            title: {js_title},
+            artist: "TeddyCloud",
+            artwork: {js_artwork},
+          }});
+          audio.addEventListener("play", () => {{ navigator.mediaSession.playbackState = "playing"; }});
+          audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
+        }}
+      }} catch (err) {{
+        statusEl.textContent = "Failed to load: " + err.message;
+      }}
+    }})();
   </script>
 </body>
 </html>"""
