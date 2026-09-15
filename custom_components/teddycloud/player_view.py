@@ -260,11 +260,28 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
         : window.MediaSource
           ? "MediaSource"
           : "none";
+
+      // Diagnostic pass: MP4+Opus is what playViaMSE() actually uses right
+      // now, but WebKit's Opus additions (Safari 18.4) were specifically
+      // for WebM, not MP4 — checking several combinations at once here so
+      // a single report settles which container/codec string (if any)
+      // this device actually supports, instead of another guess-and-check
+      // round trip.
+      const candidates = [
+        'audio/mp4; codecs="opus"',
+        'audio/webm; codecs="opus"',
+        'audio/webm;codecs=opus',
+        'audio/ogg; codecs="opus"',
+      ];
+      const support = MSClass
+        ? candidates.map((c) => `${{c}} → ${{MSClass.isTypeSupported(c)}}`).join(" | ")
+        : "(no MediaSource class at all)";
+
       const canTryMSE =
         !!MSClass &&
         typeof MSClass.isTypeSupported === "function" &&
         MSClass.isTypeSupported('audio/mp4; codecs="opus"');
-      debugEl.textContent = `MSE class: ${{which}} — supported: ${{canTryMSE}}`;
+      debugEl.textContent = `MSE class: ${{which}} — ${{support}}`;
 
       try {{
         if (canTryMSE) {{
