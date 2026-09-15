@@ -153,6 +153,58 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
     }}
 
+    // Experiment: let the browser stream straight off the network via a
+    // plain <source>, the same way teddyCloud's own web UI's player
+    // does - no fetch(), no Blob, no MediaSource, just native <audio>
+    // playback against stream_view.py's Range-forwarding proxy. This is
+    // the simplest possible approach and - if it holds up - gets
+    // everything the other two paths have to work around: instant start
+    // (the browser only needs the first bit to begin playing), correct
+    // duration and free seeking from the very first frame (the browser
+    // resolves both itself via Range requests, exactly like teddyCloud's
+    // own player), and normal AirPlay (a plain network URL, not a blob:
+    // one, so no dual-<source> trick needed either).
+    //
+    // What's unverified: whether this survives iOS backgrounding/lock
+    // screen. The earlier finding that a live network connection gets
+    // suspended by iOS was made against the HA dashboard's *inline*
+    // player, where a live HA websocket died at the same moment - it may
+    // have been that websocket/page script activity iOS was suspending,
+    // not the native <audio> element's own network fetching specifically
+    // (iOS has a sanctioned, exempted "background audio playback" mode
+    // for exactly this, which is *why* podcast web players keep working
+    // backgrounded). If that's the real explanation, this path should
+    // survive backgrounding fine despite being "live" network audio,
+    // and the fetch()-driven paths below it (which are ordinary page
+    // script activity, not the sanctioned media-playback exemption)
+    // would actually be *more* exposed to suspension, not less. Only a
+    // real-device test settles this either way.
+    async function playViaNativeStream() {{
+      const source = document.createElement("source");
+      source.type = "audio/ogg";
+      source.src = {js_stream_url};
+      audio.append(source);
+
+      // A failed <source> fires "error" on *itself*, not on the parent
+      // <audio> - confirmed with a real Chromium instance: an <audio>
+      // with a single 404ing <source> child never fires its own "error"
+      // event at all (only "emptied"), so listening there hangs forever
+      // instead of ever rejecting. The <source> element is where the
+      // real signal shows up.
+      const ready = new Promise((resolve, reject) => {{
+        audio.addEventListener("loadedmetadata", resolve, {{ once: true }});
+        source.addEventListener(
+          "error",
+          () => reject(new Error("source failed to load")),
+          {{ once: true }}
+        );
+      }});
+      audio.load();
+      await ready;
+      statusEl.style.display = "none";
+      await audio.play();
+    }}
+
     // Proven, always-available path (was the only path before this dev
     // branch): download the whole file into memory before starting
     // playback at all. Once loaded, playback needs no network whatsoever,
@@ -305,6 +357,32 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
           }}
         }});
 
+      // teddyCloud's API has no total-duration field at all - confirmed
+      // against its own source: even teddyCloud's own official web UI
+      // only learns duration by measuring the browser's <audio> element
+      // after the full stream has loaded, exactly like this page's
+      // playViaFullDownload() does. A MediaSource with no duration ever
+      // set reads as an unbounded live stream to Safari for as long as
+      // that lasts - no seek bar, no time display, exactly what shows up
+      // here while the background download is still running. Growing
+      // mediaSource.duration to match what's actually been appended so
+      // far (never shrinking it, which would truncate already-buffered
+      // media - only ever increasing) fixes that without needing to know
+      // the real total ahead of time: the seek bar reaches exactly as
+      // far as the download has progressed, landing on the exact total
+      // once it finishes. Seeking ahead of that isn't possible either
+      // way - the remux always starts from the beginning of the stream,
+      // so there's no byte offset to jump to for audio that hasn't
+      // downloaded yet.
+      const growDuration = () => {{
+        if (mediaSource.readyState !== "open" || sourceBuffer.updating) return;
+        if (sourceBuffer.buffered.length === 0) return;
+        const end = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+        if (Number.isNaN(mediaSource.duration) || end > mediaSource.duration) {{
+          mediaSource.duration = end;
+        }}
+      }};
+
       const resp = await fetch({js_remux_url});
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const reader = resp.body.getReader();
@@ -321,6 +399,7 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
           const slice = value.subarray(offset, offset + MAX_APPEND_BYTES);
           await waitForBufferSpace();
           await appendChunk(slice);
+          growDuration();
           if (!started) {{
             started = true;
             statusEl.style.display = "none";
@@ -360,6 +439,23 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
         typeof MSClass.isTypeSupported === "function" &&
         MSClass.isTypeSupported('audio/webm; codecs="opus"');
       debugEl.textContent = `MSE class: ${{which}} — ${{support}}`;
+
+      // Tried first, ahead of everything else below: see
+      // playViaNativeStream()'s comment for why this might turn out to
+      // be strictly better than either fallback if it survives
+      // backgrounding - instant start, correct duration, and free
+      // seeking all for free, no ffmpeg/MSE involved. Returns
+      // immediately on success so only one path is ever actually
+      // exercised at a time.
+      try {{
+        debugEl.textContent += " — trying native stream…";
+        await playViaNativeStream();
+        debugEl.textContent += " — playing via native stream (experiment)";
+        return;
+      }} catch (nativeErr) {{
+        debugEl.textContent += ` — native stream failed (${{nativeErr.message}})`;
+        audio.textContent = "";
+      }}
 
       try {{
         if (canTryMSE) {{

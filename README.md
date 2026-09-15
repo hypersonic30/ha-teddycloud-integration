@@ -124,52 +124,71 @@ never touches it.
 Waiting for the whole file to download before starting playback is
 reliable, but a real wait for long recordings. Prerelease versions (tagged
 `vX.Y.Z`, marked as a GitHub prerelease so they're never offered as a
-regular HACS update) add a second path, tried first: `/api/teddycloud/
-remux/<entry_id>/<box>/<ruid>` remuxes (not transcodes — `ffmpeg -c:a
-copy`, no re-encoding) teddyCloud's Ogg/Opus into WebM as it downloads,
-and the player page progressively appends it to a `MediaSource` (or, on
-iOS Safari 17.1+, `ManagedMediaSource`) so playback can start almost
-immediately. It falls back to the proven full-download approach wherever
-MSE isn't usable — unsupported browser/codec, or any error partway
-through — so this is additive, not a replacement. Install a prerelease via
+regular HACS update) try faster paths first, falling back to the proven
+full-download approach if they don't pan out. Install a prerelease via
 HACS's "Redownload" dialog (pick the version); roll back the same way if
 it doesn't hold up.
 
-WebM, not MP4: an earlier version targeted fragmented MP4 based on
-research claiming Safari 18.4 added Opus-in-MP4 support for MediaSource —
-wrong, confirmed by testing several MIME/codec strings on real hardware
-(`ManagedMediaSource.isTypeSupported`): `audio/mp4; codecs="opus"` →
-false, `audio/webm; codecs="opus"` → true, on a current iOS version.
-Safari's Opus additions were for WebM specifically.
+**Native streaming (tried first).** The simplest possible approach: a
+plain `<audio>` `<source>` pointed straight at the stream proxy, same as
+teddyCloud's own web UI's player — no `fetch()`, no `Blob`, no
+`MediaSource`. `stream_view.py` already forwards `Range` requests to
+teddyCloud (confirmed against teddyCloud's own source: it really does
+seek and serve partial content for cached files, not just accept the
+header and ignore it), so the browser resolves duration and arbitrary
+seeking itself, immediately, exactly like teddyCloud's own player does —
+verified against a real Chromium instance seeking to the last few seconds
+of a test file before anything beyond the first Range request had been
+fetched. AirPlay needs no special handling either, since the source is
+already a plain network URL rather than a `blob:` one.
+
+What's unverified: whether this survives iOS backgrounding/lock screen.
+The earlier finding that a live connection gets suspended by iOS was
+made against the HA dashboard's *inline* player, where a live HA
+websocket died at the same moment — it may have been that websocket, or
+general page-script `fetch()` activity, that iOS was actually suspending,
+not a native `<audio>` element's own network fetching (iOS has a
+sanctioned "background audio playback" exemption for exactly that,
+which is why browser-based podcast players keep working backgrounded).
+If so, this path should hold up fine despite being live network audio —
+only a real-device test settles it, which is the current open question.
+
+**MediaSource/WebM remux (fallback #1).** If native streaming's `<source>`
+fails to load, `/api/teddycloud/remux/<entry_id>/<box>/<ruid>` remuxes
+(not transcodes — `ffmpeg -c:a copy`, no re-encoding) teddyCloud's
+Ogg/Opus into WebM as it downloads, and the player page progressively
+appends it to a `MediaSource` (or, on iOS Safari 17.1+,
+`ManagedMediaSource`). WebM, not MP4: an earlier version targeted
+fragmented MP4 based on research claiming Safari 18.4 added Opus-in-MP4
+support for MediaSource — wrong, confirmed by testing several MIME/codec
+strings on real hardware (`ManagedMediaSource.isTypeSupported`):
+`audio/mp4; codecs="opus"` → false, `audio/webm; codecs="opus"` → true.
 
 Requires `ffmpeg` (bundled with Home Assistant OS and the official
-Container image; not guaranteed elsewhere). The remux mechanics (WebM
-Cluster generation, concurrent stdin/stdout piping, progressive delivery)
-and the browser-side MediaSource/SourceBuffer playback have both been
-verified against a real ffmpeg binary and a real Chromium instance — real
-audio genuinely plays back progressively, not just in theory — and the
-WebM+Opus combination has since been confirmed supported on real iOS
-hardware via the player page's own diagnostics line.
+Container image; not guaranteed elsewhere). Appending has to be throttled
+and chunked to avoid `QuotaExceededError`, confirmed on real iOS hardware
+in two distinct ways: appending as fast as data arrives overruns
+`SourceBuffer`'s memory quota outright (fixed with a buffered-ahead cap),
+and separately, a *single* `reader.read()` call from `fetch()` can itself
+return a chunk of several megabytes (observed: ~18.5MB in one call)
+regardless of how the read loop is paced, blowing the quota in one
+`appendBuffer()` call even with inter-read throttling in place — fixed by
+slicing every chunk into 64KB pieces before appending. Since teddyCloud's
+API has no total-duration field at all (confirmed against its own
+source — even its own web UI only learns duration by measuring the
+browser's `<audio>` element after the full stream loads), the reported
+duration grows to match what's actually been appended so far rather than
+claiming to be a live stream; seeking ahead of the download isn't
+possible either way, since the remux always starts from the beginning.
 
-Appending has to be throttled and chunked to avoid `QuotaExceededError`,
-confirmed on real iOS hardware in two distinct ways: first, appending as
-fast as data arrives overruns `SourceBuffer`'s memory quota outright
-(fixed with a buffered-ahead cap). Second — found only after that fix,
-via failure diagnostics captured on a real device — a *single*
-`reader.read()` call from `fetch()` can itself return a chunk of several
-megabytes (observed: ~18.5MB in one call) regardless of how the read loop
-is paced, since the network layer buffers under the hood; appending that
-whole chunk in one `appendBuffer()` call blew the quota even with
-throttling in place between reads. Fixed by slicing every chunk into
-64KB pieces before appending, re-checking buffer space between slices —
-verified locally by forcing `fetch()` to hand back an entire ~1.7MB test
-file as one chunk under a simulated low quota, confirming playback
-proceeds via many small appends instead of failing on the big one.
+**Full download (fallback #2, the original, always-available path.)**
+Downloads the whole file into memory before starting playback, trading a
+wait up front for playback that needs no network at all once started.
 
-What's *not* yet confirmed: full end-to-end playback (not just capability
-detection, and not just the chunking fix in isolation) on real iOS Safari
-over a real network connection, and how `ManagedMediaSource`'s OS-driven
-buffer eviction under memory pressure behaves in practice.
+What's *not* yet confirmed end-to-end on real iOS Safari over a real
+network connection: whether native streaming survives backgrounding (the
+main open question), and how `ManagedMediaSource`'s OS-driven buffer
+eviction under memory pressure behaves in practice for the WebM fallback.
 
 ## Known limitations (by design, not a bug)
 
