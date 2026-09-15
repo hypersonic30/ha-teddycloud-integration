@@ -31,7 +31,7 @@ playback never touches that second source at all.
 
 dev-branch experiment: playViaMSE() in the rendered page tries to start
 playback almost immediately instead of waiting for the whole download, by
-progressively appending a fragmented-MP4 remux (remux_view.py) to a
+progressively appending a WebM remux (remux_view.py) to a
 MediaSource as it downloads. Falls back to the proven playViaFullDownload()
 above wherever MSE isn't usable (unsupported browser/codec, or any error
 partway through), so this is additive, not a replacement.
@@ -197,19 +197,23 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
     }}
 
     // Experimental (dev branch): start playback almost immediately by
-    // progressively appending a fragmented-MP4 remux (see remux_view.py —
-    // same audio, repackaged, not re-encoded) to a MediaSource-backed
-    // <source> as it downloads, instead of waiting for the whole file.
-    // iOS Safari needs the "Managed" variant of this API (17.1+); where
-    // neither is available, or the browser can't decode this exact
-    // codec/container combination, playViaFullDownload() above is used
-    // instead — as it also is if anything here throws partway through.
+    // progressively appending a WebM remux (see remux_view.py — same
+    // audio, repackaged, not re-encoded) to a MediaSource-backed <source>
+    // as it downloads, instead of waiting for the whole file. iOS Safari
+    // needs the "Managed" variant of this API (17.1+); where neither is
+    // available, or the browser can't decode this exact codec/container
+    // combination, playViaFullDownload() above is used instead — as it
+    // also is if anything here throws partway through.
+    //
+    // WebM, not MP4: confirmed on real hardware that Safari's Opus
+    // support for MediaSource is for WebM specifically — see
+    // remux_view.py's docstring for how that was verified.
     async function playViaMSE(MSClass) {{
-      const mimeType = 'audio/mp4; codecs="opus"';
+      const mimeType = 'audio/webm; codecs="opus"';
       const mediaSource = new MSClass();
 
       const localSource = document.createElement("source");
-      localSource.type = "audio/mp4";
+      localSource.type = "audio/webm";
       localSource.src = URL.createObjectURL(mediaSource);
       const airplaySource = document.createElement("source");
       airplaySource.type = "audio/ogg";
@@ -280,7 +284,7 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       const canTryMSE =
         !!MSClass &&
         typeof MSClass.isTypeSupported === "function" &&
-        MSClass.isTypeSupported('audio/mp4; codecs="opus"');
+        MSClass.isTypeSupported('audio/webm; codecs="opus"');
       debugEl.textContent = `MSE class: ${{which}} — ${{support}}`;
 
       try {{

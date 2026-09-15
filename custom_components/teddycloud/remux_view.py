@@ -1,23 +1,27 @@
-"""HTTP view that remuxes teddyCloud's Ogg/Opus stream into fragmented MP4.
+"""HTTP view that remuxes teddyCloud's Ogg/Opus stream into WebM.
 
 Only for the player page's instant-start experiment: Media Source
 Extensions (MSE) needs to receive data as a supported container/codec
 combination, and Safari never accepts a raw Ogg container via
 SourceBuffer.appendBuffer() even though it can play the exact same Opus
-audio directly via a plain <audio src>. Fragmented MP4 with Opus is the
-combination Safari 18.4+ actually supports for MSE.
+audio directly via a plain <audio src>.
+
+This targets WebM, not MP4, on real-device evidence: a first version
+targeted fragmented MP4 based on research claiming Safari 18.4 added
+Opus-in-MP4 support for MSE — wrong, confirmed by testing several
+MIME/codec strings on real hardware (`ManagedMediaSource.isTypeSupported`):
+`audio/mp4; codecs="opus"` → false, `audio/webm; codecs="opus"` → true, on
+a current iOS version. Safari's Opus additions were for WebM, not MP4.
 
 This is a *remux*, not a transcode: ffmpeg is told `-c:a copy`, so it only
 repackages the same compressed Opus frames into a different container —
 no decoding, no re-encoding, no quality loss, and cheap on CPU (unlike a
 real transcode to e.g. AAC). Verified locally against a real ffmpeg
-binary before writing this: `-movflags
-frag_keyframe+empty_moov+default_base_moof -frag_duration 2000000`
-produces a properly fragmented file (one moof/mdat pair roughly every 2
-seconds) rather than a single fragment for the whole file, which matters
-here — a single fragment would mean the client has to wait for the
-*entire* remux to finish before it can play anything, defeating the
-point of this endpoint.
+binary: WebM's own muxer writes multiple Cluster elements as data arrives
+even with no special flags (unlike fragmented MP4, which needed explicit
+-movflags/-frag_duration to avoid a single fragment for the whole file) —
+confirmed by counting Cluster IDs (0x1F43B675) in real output: roughly one
+per second of audio for a 60-second test file.
 
 teddyCloud's stream is piped into ffmpeg's stdin and its stdout piped
 back to the HTTP client concurrently (both directions have to be pumped
@@ -45,15 +49,13 @@ _HEX_CHARS = set("0123456789abcdefABCDEF")
 _FFMPEG_ARGS = (
     "-i", "pipe:0",
     "-c:a", "copy",
-    "-f", "mp4",
-    "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-    "-frag_duration", "2000000",
+    "-f", "webm",
     "pipe:1",
 )
 
 
 class TeddyCloudRemuxView(HomeAssistantView):
-    """Streams a fragmented-MP4 remux of teddyCloud's content for MSE."""
+    """Streams a WebM remux of teddyCloud's content for MSE."""
 
     url = "/api/teddycloud/remux/{entry_id}/{overlay}/{ruid}"
     name = "api:teddycloud:remux"
@@ -102,7 +104,7 @@ class TeddyCloudRemuxView(HomeAssistantView):
 
         feed_task = asyncio.ensure_future(feed_stdin())
 
-        response = web.StreamResponse(status=200, headers={"Content-Type": "audio/mp4"})
+        response = web.StreamResponse(status=200, headers={"Content-Type": "audio/webm"})
         await response.prepare(request)
         try:
             while True:
