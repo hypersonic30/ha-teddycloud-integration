@@ -109,6 +109,16 @@ page downloads the whole file into memory before starting playback at all
 streaming it — once loaded, playback needs no network at all, so nothing
 iOS does to the tab's connections in the background can interrupt it.
 
+That local copy alone left AirPlay to another device broken, since a
+receiver has to fetch the source itself and a browser-local `blob:` URL
+has no network address to fetch. Fixed using
+[WebKit's own documented pattern](https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/)
+for exactly this: the `<audio>` element gets two `<source>` children, the
+local copy first (what actually plays) and this page's own stream proxy
+URL second, purely as an AirPlay fallback. Safari transparently switches
+to that second, fetchable URL when AirPlay is chosen — normal playback
+never touches it.
+
 ## Known limitations (by design, not a bug)
 
 teddyCloud/the Toniebox protocol simply doesn't expose these, so they aren't built:

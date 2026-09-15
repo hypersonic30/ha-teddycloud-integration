@@ -15,9 +15,22 @@ network connection iOS can suspend mid-playback. So this page downloads
 the whole file into memory (via fetch()) before starting playback at all,
 trading a wait up front for playback that needs no network whatsoever
 once started — nothing iOS does to backgrounded connections can interrupt
-it. It's a cover image, an <audio> element played from a local blob: URL,
-and enough JS to register Media Session metadata so the lock screen still
-shows title/cover art and play/pause/seek controls.
+it.
+
+A single blob: URL alone would leave AirPlay to another device broken,
+though: a receiver has to fetch the source itself, and a blob: URL has no
+network address for it to fetch. WebKit has an official, documented
+pattern for exactly this — see
+https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/
+— give the <audio> element two <source> children instead of one: the
+local blob: copy first (what actually plays normally), and the plain
+stream_view proxy URL second, purely as an AirPlay fallback. Safari
+transparently switches to the second source's URL when the user picks
+AirPlay, handing the receiver something it can fetch on its own; normal
+playback never touches that second source at all. This is why the
+overall page is a cover image, an <audio> element, and enough JS to
+register Media Session metadata so the lock screen still shows
+title/cover art and play/pause/seek controls.
 """
 from __future__ import annotations
 
@@ -140,7 +153,20 @@ def _render(title: str, picture: str | None, stream_url: str) -> str:
             ? `Loading… ${{Math.round((received / total) * 100)}}% (${{mb}} MB)`
             : `Loading… ${{mb}} MB`;
         }}
-        audio.src = URL.createObjectURL(new Blob(chunks, {{ type: "audio/ogg" }}));
+
+        // Local copy first (what actually plays), the live proxy URL
+        // second purely so AirPlay has something fetchable to hand a
+        // receiver — see the module docstring. Normal playback never
+        // touches the second source.
+        const localSource = document.createElement("source");
+        localSource.src = URL.createObjectURL(new Blob(chunks, {{ type: "audio/ogg" }}));
+        localSource.type = "audio/ogg";
+        const airplaySource = document.createElement("source");
+        airplaySource.src = {js_stream_url};
+        airplaySource.type = "audio/ogg";
+        audio.append(localSource, airplaySource);
+        audio.load();
+
         statusEl.style.display = "none";
         audio.play();
 
