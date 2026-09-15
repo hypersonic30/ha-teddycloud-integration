@@ -153,6 +153,34 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
     }}
 
+    // Persistent diagnostics for whatever happens *after* a playback path
+    // has already succeeded - e.g. a later seek failing. None of the
+    // per-path error handling below covers this (it only watches the
+    // initial load), so without this, a later failure only ever shows up
+    // as Safari's own generic native-controls "Fehler" text, with no
+    // code or context to go on. Unlike the initial-load case (where a
+    // failed <source> fires "error" on itself, confirmed via a real
+    // Chromium probe), a resource that already loaded successfully and
+    // then hits a genuine network/decode problem fires "error" on the
+    // <audio> element itself per spec, so that's what this listens to.
+    const MEDIA_ERROR_NAMES = {{
+      1: "MEDIA_ERR_ABORTED",
+      2: "MEDIA_ERR_NETWORK",
+      3: "MEDIA_ERR_DECODE",
+      4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
+    }};
+    audio.addEventListener("error", () => {{
+      const err = audio.error;
+      debugEl.textContent +=
+        ` — LATE ERROR at t=${{audio.currentTime.toFixed(1)}}s: ` +
+        `${{err ? MEDIA_ERROR_NAMES[err.code] || `code ${{err.code}}` : "unknown"}}` +
+        (err && err.message ? ` (${{err.message}})` : "") +
+        `, networkState=${{audio.networkState}}, readyState=${{audio.readyState}}`;
+    }});
+    audio.addEventListener("stalled", () => {{
+      debugEl.textContent += ` — stalled at t=${{audio.currentTime.toFixed(1)}}s`;
+    }});
+
     // Experiment: let the browser stream straight off the network via a
     // plain <source>, the same way teddyCloud's own web UI's player
     // does - no fetch(), no Blob, no MediaSource, just native <audio>
