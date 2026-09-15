@@ -165,6 +165,27 @@ place and prompts for a tap instead of discarding it and falling back to
 MSE, since a direct tap on the visible native play control is a fresh,
 in-document gesture that succeeds immediately.
 
+Known limitation, likely an upstream teddyCloud bug, not fixable from
+this integration: seeking to within roughly the last few KB of a
+recording can fail with `MEDIA_ERR_DECODE`, confirmed on a real device
+(`networkState=1`/idle, `readyState=4`/have-enough-data at the moment of
+failure — the server *did* successfully deliver a full response, it was
+just the wrong bytes). Root cause, from reading teddyCloud's own source
+(`src/cyclone/cyclone_tcp/http/http_server.c:1092-1157`): with
+`skip_header=true` (required — the raw file isn't valid Ogg without it),
+the `Content-Range`/`Content-Length` sent to the client is computed from
+the request's byte offset *before* the TAF header-length adjustment is
+added, but the later decision of whether to actually seek within the
+file compares the *already-adjusted* offset against the *unadjusted*
+total size. For an offset within the last `TONIE_HEADER_LENGTH` bytes,
+that comparison can fail, silently falling back to serving from the
+start of the file while the already-sent headers still promise the
+near-end range — the client receives the TAF header plus early audio
+mislabeled as the requested position, which can't decode. Since this
+happens server-side before the request ever reaches this integration's
+proxy, there's no client-side fix; teddyCloud's own web UI player would
+hit the identical bug.
+
 **MediaSource/WebM remux (fallback #1).** If native streaming's `<source>`
 fails to load, `/api/teddycloud/remux/<entry_id>/<box>/<ruid>` remuxes
 (not transcodes — `ffmpeg -c:a copy`, no re-encoding) teddyCloud's
