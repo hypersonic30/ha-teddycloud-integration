@@ -126,6 +126,7 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
   h1 {{ font-size: 1.1rem; font-weight: 500; margin: 0; word-break: break-word; }}
   audio {{ width: min(90vw, 400px); }}
   #status {{ font-size: 0.9rem; color: #aaa; }}
+  #debug {{ font-size: 0.75rem; color: #777; max-width: 90vw; word-break: break-word; }}
 </style>
 </head>
 <body>
@@ -133,9 +134,14 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
   <h1>{safe_title}</h1>
   <div id="status">Loading…</div>
   <audio id="a" controls></audio>
+  <div id="debug"></div>
   <script>
     const statusEl = document.getElementById("status");
     const audio = document.getElementById("a");
+    // Stays visible permanently (unlike #status, which hides once playing)
+    // so it's obvious which playback path actually ran without needing
+    // Safari's remote Web Inspector - just look at the page.
+    const debugEl = document.getElementById("debug");
 
     if ("mediaSession" in navigator) {{
       navigator.mediaSession.metadata = new MediaMetadata({{
@@ -249,21 +255,32 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
 
     (async () => {{
       const MSClass = window.ManagedMediaSource || window.MediaSource;
+      const which = window.ManagedMediaSource
+        ? "ManagedMediaSource"
+        : window.MediaSource
+          ? "MediaSource"
+          : "none";
       const canTryMSE =
         !!MSClass &&
         typeof MSClass.isTypeSupported === "function" &&
         MSClass.isTypeSupported('audio/mp4; codecs="opus"');
+      debugEl.textContent = `MSE class: ${{which}} — supported: ${{canTryMSE}}`;
 
       try {{
         if (canTryMSE) {{
+          debugEl.textContent += " — trying instant-start…";
           await playViaMSE(MSClass);
+          debugEl.textContent += " — playing via instant-start (MSE)";
         }} else {{
+          debugEl.textContent += " — playing via full download";
           await playViaFullDownload();
         }}
       }} catch (err) {{
         if (canTryMSE) {{
+          debugEl.textContent += ` — instant-start failed (${{err.message}}), falling back`;
           try {{
             await playViaFullDownload();
+            debugEl.textContent += " — playing via full download";
             return;
           }} catch (fallbackErr) {{
             statusEl.textContent = "Failed to load: " + fallbackErr.message;
