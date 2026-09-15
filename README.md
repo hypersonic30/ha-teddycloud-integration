@@ -93,9 +93,13 @@ minimal, self-contained HTML page (cover art, title, and just enough JS to
 register the
 [Media Session API](https://developer.mozilla.org/en-US/docs/Web/API/Media_Session_API)
 for lock-screen controls) meant to be opened in its own browser tab. The
-ha-teddycloud-card uses this rather than playing inline, since a full HA
-dashboard is a heavy, actively-networking page that iOS is much less
-willing to keep alive in the background than a bare, single-purpose one.
+ha-teddycloud-card uses this rather than playing inline: two different
+inline approaches were tried and both eventually got wiped out, together
+with the whole player UI disappearing, a few minutes in — pointing at Home
+Assistant's own frontend rebuilding the dashboard view (and every card in
+it) after recovering from a websocket outage, unrelated to audio or
+networking specifically. A standalone tab isn't part of that dashboard's
+lifecycle at all, so rebuilding the dashboard can't touch it.
 
 Being a bare page alone still wasn't fully reliable in practice — iOS can
 suspend a backgrounded tab's network connections regardless of how little
