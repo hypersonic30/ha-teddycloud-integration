@@ -243,23 +243,20 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       await openPromise;
 
       const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-      const appendChunk = (chunk) =>
-        new Promise((resolve, reject) => {{
-          sourceBuffer.addEventListener("updateend", resolve, {{ once: true }});
-          sourceBuffer.addEventListener("error", () => reject(new Error("SourceBuffer error")), {{
-            once: true,
-          }});
-          sourceBuffer.appendBuffer(chunk);
-        }});
 
       // Downloading is many times faster than playback consumes it (a
       // multi-hour recording can fully download in well under a minute),
       // so appending as fast as it arrives quickly overruns the
       // SourceBuffer's memory quota (a real QuotaExceededError, not
-      // theoretical - hit this on real hardware). Stop pulling more
-      // chunks once comfortably far ahead of the current playback
-      // position, and resume once playback has caught up some.
-      const MAX_BUFFER_AHEAD_SECONDS = 60;
+      // theoretical - hit this on real hardware, twice: once with no
+      // throttling at all, and again with a 60-second-ahead cap that was
+      // still too generous for whatever ManagedMediaSource actually
+      // allows on iOS). Down to a much smaller cap this time, and
+      // capturing the buffered-ahead amount and chunk/total sizes at the
+      // moment of failure so a third attempt (if needed) has real numbers
+      // to go on instead of another guess.
+      const MAX_BUFFER_AHEAD_SECONDS = 5;
+      let totalAppended = 0;
       const bufferedAheadSeconds = () => {{
         if (sourceBuffer.buffered.length === 0) return 0;
         const end = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
@@ -269,9 +266,36 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
         new Promise((resolve) => {{
           const check = () => {{
             if (bufferedAheadSeconds() <= MAX_BUFFER_AHEAD_SECONDS) resolve();
-            else setTimeout(check, 500);
+            else setTimeout(check, 250);
           }};
           check();
+        }});
+      const appendChunk = (chunk) =>
+        new Promise((resolve, reject) => {{
+          const fail = (label) => {{
+            reject(
+              new Error(
+                `${{label}} (bufferedAhead=${{bufferedAheadSeconds().toFixed(1)}}s, ` +
+                  `chunk=${{chunk.length}}B, totalAppended=${{(totalAppended / 1024).toFixed(0)}}KB)`
+              )
+            );
+          }};
+          sourceBuffer.addEventListener(
+            "updateend",
+            () => {{
+              totalAppended += chunk.length;
+              resolve();
+            }},
+            {{ once: true }}
+          );
+          sourceBuffer.addEventListener("error", () => fail("SourceBuffer error event"), {{
+            once: true,
+          }});
+          try {{
+            sourceBuffer.appendBuffer(chunk);
+          }} catch (err) {{
+            fail(`${{err.name}}: ${{err.message}}`);
+          }}
         }});
 
       const resp = await fetch({js_remux_url});
