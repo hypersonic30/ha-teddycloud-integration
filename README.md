@@ -153,6 +153,18 @@ which is why browser-based podcast players keep working backgrounded).
 If so, this path should hold up fine despite being live network audio —
 only a real-device test settles it, which is the current open question.
 
+Autoplay needs a tap on real iOS hardware: confirmed on a real device,
+`audio.play()` rejects with WebKit's `NotAllowedError` for this path
+specifically (duration/seeking still resolve correctly either way) —
+consistent with the other two paths' source being a local `blob:` URL
+(already-downloaded data) by the time `play()` runs, while this one is a
+genuine network URL, which iOS Safari's autoplay-with-sound policy
+doesn't extend the same allowance to in a freshly `window.open()`'d tab.
+Not treated as a failure: the page keeps the native-stream source in
+place and prompts for a tap instead of discarding it and falling back to
+MSE, since a direct tap on the visible native play control is a fresh,
+in-document gesture that succeeds immediately.
+
 **MediaSource/WebM remux (fallback #1).** If native streaming's `<source>`
 fails to load, `/api/teddycloud/remux/<entry_id>/<box>/<ruid>` remuxes
 (not transcodes — `ffmpeg -c:a copy`, no re-encoding) teddyCloud's

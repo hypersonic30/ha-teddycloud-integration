@@ -202,7 +202,31 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       audio.load();
       await ready;
       statusEl.style.display = "none";
-      await audio.play();
+
+      try {{
+        await audio.play();
+      }} catch (playErr) {{
+        if (playErr.name === "NotAllowedError") {{
+          // Real audio, correct duration, and free seeking are all
+          // already working at this point - confirmed on real iOS
+          // hardware: only the *autoplay* itself gets blocked here,
+          // consistent with the other two paths' <audio> source being a
+          // local blob: URL (already-downloaded data) by the time
+          // play() runs, while this one is a genuine network URL - iOS
+          // Safari's autoplay-with-sound policy allows the former in a
+          // freshly window.open()'d tab but not the latter. Not a real
+          // failure of this path: leave the source in place with its
+          // native controls visible rather than discarding all of that
+          // and falling back to MSE/full-download. The user's own tap on
+          // the visible play button supplies a fresh, in-document
+          // gesture, which is unambiguously valid.
+          statusEl.style.display = "";
+          statusEl.textContent = "Tap ▶ to start playback";
+          return "needs-tap";
+        }}
+        throw playErr;
+      }}
+      return "playing";
     }}
 
     // Proven, always-available path (was the only path before this dev
@@ -449,8 +473,11 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       // exercised at a time.
       try {{
         debugEl.textContent += " — trying native stream…";
-        await playViaNativeStream();
-        debugEl.textContent += " — playing via native stream (experiment)";
+        const outcome = await playViaNativeStream();
+        debugEl.textContent +=
+          outcome === "needs-tap"
+            ? " — native stream ready (experiment), tap ▶ to start"
+            : " — playing via native stream (experiment)";
         return;
       }} catch (nativeErr) {{
         debugEl.textContent += ` — native stream failed (${{nativeErr.message}})`;
