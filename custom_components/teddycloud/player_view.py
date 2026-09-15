@@ -164,7 +164,7 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
     // no network address for one to fetch) — see
     // https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/.
     // Normal playback never touches that second source.
-    async function playViaFullDownload() {{
+    async function playViaFullDownload(resumeFrom) {{
       const resp = await fetch({js_stream_url});
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const total = Number(resp.headers.get("Content-Length")) || 0;
@@ -189,11 +189,24 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       const airplaySource = document.createElement("source");
       airplaySource.src = {js_stream_url};
       airplaySource.type = "audio/ogg";
+
+      // If this runs as a mid-playback fallback (the instant-start attempt
+      // got partway through before failing), pick up where that left off
+      // instead of restarting at 0.
+      if (resumeFrom) {{
+        const onResume = () => {{
+          audio.removeEventListener("loadedmetadata", onResume);
+          audio.currentTime = resumeFrom;
+          audio.play();
+        }};
+        audio.addEventListener("loadedmetadata", onResume);
+      }}
+
       audio.append(localSource, airplaySource);
       audio.load();
 
       statusEl.style.display = "none";
-      audio.play();
+      if (!resumeFrom) audio.play();
     }}
 
     // Experimental (dev branch): start playback almost immediately by
@@ -239,12 +252,35 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
           sourceBuffer.appendBuffer(chunk);
         }});
 
+      // Downloading is many times faster than playback consumes it (a
+      // multi-hour recording can fully download in well under a minute),
+      // so appending as fast as it arrives quickly overruns the
+      // SourceBuffer's memory quota (a real QuotaExceededError, not
+      // theoretical - hit this on real hardware). Stop pulling more
+      // chunks once comfortably far ahead of the current playback
+      // position, and resume once playback has caught up some.
+      const MAX_BUFFER_AHEAD_SECONDS = 60;
+      const bufferedAheadSeconds = () => {{
+        if (sourceBuffer.buffered.length === 0) return 0;
+        const end = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+        return end - audio.currentTime;
+      }};
+      const waitForBufferSpace = () =>
+        new Promise((resolve) => {{
+          const check = () => {{
+            if (bufferedAheadSeconds() <= MAX_BUFFER_AHEAD_SECONDS) resolve();
+            else setTimeout(check, 500);
+          }};
+          check();
+        }});
+
       const resp = await fetch({js_remux_url});
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const reader = resp.body.getReader();
 
       let started = false;
       while (true) {{
+        await waitForBufferSpace();
         const {{ done, value }} = await reader.read();
         if (done) break;
         await appendChunk(value);
@@ -300,7 +336,10 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
         if (canTryMSE) {{
           debugEl.textContent += ` — instant-start failed (${{err.message}}), falling back`;
           try {{
-            await playViaFullDownload();
+            // Resume from wherever instant-start got to instead of
+            // restarting at 0, in case it was already playing when it
+            // failed (e.g. a QuotaExceededError partway through).
+            await playViaFullDownload(audio.currentTime || undefined);
             debugEl.textContent += " — playing via full download";
             return;
           }} catch (fallbackErr) {{
