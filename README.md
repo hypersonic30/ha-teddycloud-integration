@@ -119,6 +119,30 @@ URL second, purely as an AirPlay fallback. Safari transparently switches
 to that second, fetchable URL when AirPlay is chosen — normal playback
 never touches it.
 
+### `dev` branch: instant-start playback (experimental)
+
+The `main` branch's player page always waits for the whole file to download
+before starting playback — reliable, but a real wait for long recordings.
+This `dev` branch adds a second path, tried first: `/api/teddycloud/remux/
+<entry_id>/<box>/<ruid>` remuxes (not transcodes — `ffmpeg -c:a copy`, no
+re-encoding) teddyCloud's Ogg/Opus into fragmented MP4 as it downloads, and
+the player page progressively appends it to a `MediaSource` (or, on iOS
+Safari 17.1+, `ManagedMediaSource`) so playback can start almost
+immediately. It falls back to the proven full-download approach wherever
+MSE isn't usable — unsupported browser/codec, or any error partway
+through — so this is additive, not a replacement.
+
+Requires `ffmpeg` (bundled with Home Assistant OS and the official
+Container image; not guaranteed elsewhere). The remux mechanics
+(fragmentation, concurrent stdin/stdout piping, progressive delivery) and
+the browser-side MediaSource/SourceBuffer playback have both been verified
+against a real ffmpeg binary and a real Chromium instance — real audio
+genuinely plays back progressively, not just in theory. What's *not* yet
+verified on real hardware: Safari's `ManagedMediaSource` specifically,
+which behaves differently from plain `MediaSource` (the OS can evict
+buffered data under memory pressure) and which no test environment
+available here can exercise.
+
 ## Known limitations (by design, not a bug)
 
 teddyCloud/the Toniebox protocol simply doesn't expose these, so they aren't built:

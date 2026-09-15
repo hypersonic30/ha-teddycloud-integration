@@ -11,6 +11,7 @@ from .const import CONF_HOST, CONF_PORT, CONF_SIDECAR_URL, CONF_SSL, CONF_VERIFY
 from .coordinator import TeddyCloudCoordinator
 from .services import async_register_services
 from .player_view import TeddyCloudPlayerView
+from .remux_view import TeddyCloudRemuxView
 from .sidecar_api import SidecarApiClient
 from .stream_view import TeddyCloudStreamView
 
@@ -23,6 +24,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_register_services(hass)
     hass.http.register_view(TeddyCloudStreamView())
     hass.http.register_view(TeddyCloudPlayerView())
+    hass.http.register_view(TeddyCloudRemuxView())
     return True
 
 

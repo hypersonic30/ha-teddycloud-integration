@@ -27,10 +27,14 @@ local blob: copy first (what actually plays normally), and the plain
 stream_view proxy URL second, purely as an AirPlay fallback. Safari
 transparently switches to the second source's URL when the user picks
 AirPlay, handing the receiver something it can fetch on its own; normal
-playback never touches that second source at all. This is why the
-overall page is a cover image, an <audio> element, and enough JS to
-register Media Session metadata so the lock screen still shows
-title/cover art and play/pause/seek controls.
+playback never touches that second source at all.
+
+dev-branch experiment: playViaMSE() in the rendered page tries to start
+playback almost immediately instead of waiting for the whole download, by
+progressively appending a fragmented-MP4 remux (remux_view.py) to a
+MediaSource as it downloads. Falls back to the proven playViaFullDownload()
+above wherever MSE isn't usable (unsupported browser/codec, or any error
+partway through), so this is additive, not a replacement.
 """
 from __future__ import annotations
 
@@ -76,8 +80,11 @@ class TeddyCloudPlayerView(HomeAssistantView):
         title = tonie["title"] if tonie else ruid
         picture = tonie.get("picture") if tonie else None
         stream_url = f"/api/teddycloud/stream/{entry_id}/{overlay}/{ruid}"
+        remux_url = f"/api/teddycloud/remux/{entry_id}/{overlay}/{ruid}"
 
-        return web.Response(text=_render(title, picture, stream_url), content_type="text/html")
+        return web.Response(
+            text=_render(title, picture, stream_url, remux_url), content_type="text/html"
+        )
 
 
 def _json_for_script(value) -> str:
@@ -92,12 +99,13 @@ def _json_for_script(value) -> str:
     return json.dumps(value).replace("<", "\\u003c")
 
 
-def _render(title: str, picture: str | None, stream_url: str) -> str:
+def _render(title: str, picture: str | None, stream_url: str, remux_url: str) -> str:
     safe_title = html.escape(title)
     safe_picture_attr = html.escape(picture) if picture else None
     js_title = _json_for_script(title)
     js_artwork = _json_for_script([{"src": picture}] if picture else [])
     js_stream_url = _json_for_script(stream_url)
+    js_remux_url = _json_for_script(remux_url)
 
     cover_html = f'<img src="{safe_picture_attr}" alt="">' if safe_picture_attr else ""
 
@@ -126,60 +134,142 @@ def _render(title: str, picture: str | None, stream_url: str) -> str:
   <div id="status">Loading…</div>
   <audio id="a" controls></audio>
   <script>
-    // Downloads the whole file into memory before starting playback,
-    // instead of streaming it live: once loaded, playback needs no network
-    // at all, so nothing iOS does to a backgrounded tab's connections can
-    // interrupt it. Streaming playback kept stopping in the background
-    // even from this same minimal page — this trades a wait up front
-    // (roughly the file size divided by your connection speed) for
-    // eliminating the dependency on an open connection during playback.
-    (async () => {{
-      const statusEl = document.getElementById("status");
-      const audio = document.getElementById("a");
-      try {{
-        const resp = await fetch({js_stream_url});
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        const total = Number(resp.headers.get("Content-Length")) || 0;
-        const reader = resp.body.getReader();
-        const chunks = [];
-        let received = 0;
-        while (true) {{
-          const {{ done, value }} = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          received += value.length;
-          const mb = (received / 1048576).toFixed(1);
-          statusEl.textContent = total
-            ? `Loading… ${{Math.round((received / total) * 100)}}% (${{mb}} MB)`
-            : `Loading… ${{mb}} MB`;
-        }}
+    const statusEl = document.getElementById("status");
+    const audio = document.getElementById("a");
 
-        // Local copy first (what actually plays), the live proxy URL
-        // second purely so AirPlay has something fetchable to hand a
-        // receiver — see the module docstring. Normal playback never
-        // touches the second source.
-        const localSource = document.createElement("source");
-        localSource.src = URL.createObjectURL(new Blob(chunks, {{ type: "audio/ogg" }}));
-        localSource.type = "audio/ogg";
-        const airplaySource = document.createElement("source");
-        airplaySource.src = {js_stream_url};
-        airplaySource.type = "audio/ogg";
-        audio.append(localSource, airplaySource);
-        audio.load();
+    if ("mediaSession" in navigator) {{
+      navigator.mediaSession.metadata = new MediaMetadata({{
+        title: {js_title},
+        artist: "TeddyCloud",
+        artwork: {js_artwork},
+      }});
+      audio.addEventListener("play", () => {{ navigator.mediaSession.playbackState = "playing"; }});
+      audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
+    }}
 
-        statusEl.style.display = "none";
-        audio.play();
+    // Proven, always-available path (was the only path before this dev
+    // branch): download the whole file into memory before starting
+    // playback at all. Once loaded, playback needs no network whatsoever,
+    // so nothing iOS does to a backgrounded tab's connections can
+    // interrupt it. The <audio> element gets two <source> children rather
+    // than a plain .src: the local blob: copy first (what actually
+    // plays), and the plain stream_view proxy URL second, purely so
+    // AirPlay has something fetchable to hand a receiver (a blob: URL has
+    // no network address for one to fetch) — see
+    // https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/.
+    // Normal playback never touches that second source.
+    async function playViaFullDownload() {{
+      const resp = await fetch({js_stream_url});
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const total = Number(resp.headers.get("Content-Length")) || 0;
+      const reader = resp.body.getReader();
+      const chunks = [];
+      let received = 0;
+      while (true) {{
+        const {{ done, value }} = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        const mb = (received / 1048576).toFixed(1);
+        statusEl.textContent = total
+          ? `Loading… ${{Math.round((received / total) * 100)}}% (${{mb}} MB)`
+          : `Loading… ${{mb}} MB`;
+      }}
 
-        if ("mediaSession" in navigator) {{
-          navigator.mediaSession.metadata = new MediaMetadata({{
-            title: {js_title},
-            artist: "TeddyCloud",
-            artwork: {js_artwork},
+      audio.textContent = "";
+      const localSource = document.createElement("source");
+      localSource.src = URL.createObjectURL(new Blob(chunks, {{ type: "audio/ogg" }}));
+      localSource.type = "audio/ogg";
+      const airplaySource = document.createElement("source");
+      airplaySource.src = {js_stream_url};
+      airplaySource.type = "audio/ogg";
+      audio.append(localSource, airplaySource);
+      audio.load();
+
+      statusEl.style.display = "none";
+      audio.play();
+    }}
+
+    // Experimental (dev branch): start playback almost immediately by
+    // progressively appending a fragmented-MP4 remux (see remux_view.py —
+    // same audio, repackaged, not re-encoded) to a MediaSource-backed
+    // <source> as it downloads, instead of waiting for the whole file.
+    // iOS Safari needs the "Managed" variant of this API (17.1+); where
+    // neither is available, or the browser can't decode this exact
+    // codec/container combination, playViaFullDownload() above is used
+    // instead — as it also is if anything here throws partway through.
+    async function playViaMSE(MSClass) {{
+      const mimeType = 'audio/mp4; codecs="opus"';
+      const mediaSource = new MSClass();
+
+      const localSource = document.createElement("source");
+      localSource.type = "audio/mp4";
+      localSource.src = URL.createObjectURL(mediaSource);
+      const airplaySource = document.createElement("source");
+      airplaySource.type = "audio/ogg";
+      airplaySource.src = {js_stream_url};
+      audio.append(localSource, airplaySource);
+
+      const openPromise = new Promise((resolve, reject) => {{
+        mediaSource.addEventListener("sourceopen", resolve, {{ once: true }});
+        mediaSource.addEventListener("error", () => reject(new Error("MediaSource error")), {{
+          once: true,
+        }});
+      }});
+      audio.load();
+      await openPromise;
+
+      const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+      const appendChunk = (chunk) =>
+        new Promise((resolve, reject) => {{
+          sourceBuffer.addEventListener("updateend", resolve, {{ once: true }});
+          sourceBuffer.addEventListener("error", () => reject(new Error("SourceBuffer error")), {{
+            once: true,
           }});
-          audio.addEventListener("play", () => {{ navigator.mediaSession.playbackState = "playing"; }});
-          audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
+          sourceBuffer.appendBuffer(chunk);
+        }});
+
+      const resp = await fetch({js_remux_url});
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const reader = resp.body.getReader();
+
+      let started = false;
+      while (true) {{
+        const {{ done, value }} = await reader.read();
+        if (done) break;
+        await appendChunk(value);
+        if (!started) {{
+          started = true;
+          statusEl.style.display = "none";
+          audio.play();
+        }}
+      }}
+      if (mediaSource.readyState === "open") mediaSource.endOfStream();
+    }}
+
+    (async () => {{
+      const MSClass = window.ManagedMediaSource || window.MediaSource;
+      const canTryMSE =
+        !!MSClass &&
+        typeof MSClass.isTypeSupported === "function" &&
+        MSClass.isTypeSupported('audio/mp4; codecs="opus"');
+
+      try {{
+        if (canTryMSE) {{
+          await playViaMSE(MSClass);
+        }} else {{
+          await playViaFullDownload();
         }}
       }} catch (err) {{
+        if (canTryMSE) {{
+          try {{
+            await playViaFullDownload();
+            return;
+          }} catch (fallbackErr) {{
+            statusEl.textContent = "Failed to load: " + fallbackErr.message;
+            return;
+          }}
+        }}
         statusEl.textContent = "Failed to load: " + err.message;
       }}
     }})();
