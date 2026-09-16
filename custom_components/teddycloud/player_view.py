@@ -328,16 +328,43 @@ def _render(
       3: "MEDIA_ERR_DECODE",
       4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
     }};
+    // Wall-clock time alongside audio.currentTime specifically: a real
+    // device report showed audio.currentTime jumping from ~1425s back to
+    // ~2.9s mid-session with no page reload (the debug line's own
+    // history proved that - a reload would have reset it to empty) and
+    // no way to tell from currentTime alone whether that was instant
+    // (a real reset) or happened after a long gap (e.g. the tab being
+    // backgrounded for a while) - only a real wall-clock delta between
+    // log lines can distinguish those. document.hidden is logged for the
+    // same reason: was the tab actually backgrounded at the time.
+    const logEvent = (label) => {{
+      const wallClock = new Date().toISOString().slice(11, 19);
+      debugEl.textContent +=
+        ` — [${{wallClock}}] ${{label}} at t=${{audio.currentTime.toFixed(1)}}s` +
+        ` (readyState=${{audio.readyState}}, networkState=${{audio.networkState}}, hidden=${{document.hidden}})`;
+    }};
     audio.addEventListener("error", () => {{
       const err = audio.error;
-      debugEl.textContent +=
-        ` — LATE ERROR at t=${{audio.currentTime.toFixed(1)}}s: ` +
-        `${{err ? MEDIA_ERROR_NAMES[err.code] || `code ${{err.code}}` : "unknown"}}` +
-        (err && err.message ? ` (${{err.message}})` : "") +
-        `, networkState=${{audio.networkState}}, readyState=${{audio.readyState}}`;
+      logEvent(
+        `ERROR: ${{err ? MEDIA_ERROR_NAMES[err.code] || `code ${{err.code}}` : "unknown"}}` +
+          (err && err.message ? ` (${{err.message}})` : "")
+      );
     }});
-    audio.addEventListener("stalled", () => {{
-      debugEl.textContent += ` — stalled at t=${{audio.currentTime.toFixed(1)}}s`;
+    // "stalled"/"waiting"/"suspend" can be entirely normal (a momentary
+    // buffering hiccup the browser recovers from on its own) - logged
+    // for context around a real failure, not because each one alone
+    // means something broke. "seeking"/"seeked"/"pause" without the user
+    // having touched anything would point at something (our own code, or
+    // the browser itself) changing position/state unexpectedly.
+    // "loadedmetadata" firing more than once would mean the browser
+    // re-initialized the whole media resource from scratch mid-session -
+    // exactly the kind of event that could explain currentTime jumping
+    // back unexpectedly with no page reload involved.
+    ["stalled", "waiting", "suspend", "emptied", "seeking", "seeked", "pause", "loadedmetadata"].forEach((evt) => {{
+      audio.addEventListener(evt, () => logEvent(evt));
+    }});
+    document.addEventListener("visibilitychange", () => {{
+      logEvent(`visibilitychange`);
     }});
 
     // Experiment: let the browser stream straight off the network via a
