@@ -166,6 +166,62 @@ verification — genuine per-tag factory data, not derivable from the UID,
 and reading it requires low-level ISO15693/MIFARE block access no browser
 API exposes, on any platform.
 
+## Wishlist
+
+Each box tracks a small wishlist, stored locally (not in entity state —
+see `wishlist.py`), of Tonies you don't have yet. The ha-teddycloud-card's
+wishlist section lets you search teddyCloud's full `tonies.json` catalog
+and add an entry; it disappears from the "still wanted" view on its own
+once that Tonie shows up in the box's library (matched by `tonies.json`'s
+own model ID). This part is unchanged by everything below.
+
+### Auto-restoring wishlist items from a GitHub backup repo
+
+If you keep a backup set of `.nfc` tag dumps in a GitHub repo, the
+integration can automatically restore a wishlist item once a matching
+backup is found — useful for recovering after your teddyCloud instance
+loses its tag assignments: re-add the Tonies you want (or they're
+already on the list) and let the integration quietly re-trigger the
+download for whichever ones it finds a backup for, the same way
+[Assigning a physical NFC tag to content](#assigning-a-physical-nfc-tag-to-content)
+does manually for one file. Configure a repo under Settings > Devices &
+services > TeddyCloud > Reconfigure:
+
+- **NFC backup GitHub repo** (`owner/repo`) — leave empty to disable the
+  feature entirely.
+- **Branch** — defaults to `main`.
+- **Subfolder** — optional; leave empty to use the repo root.
+- **Token** — a GitHub personal access token with read access. Required
+  for a private repo; optional for a public one, but recommended anyway
+  to raise GitHub's API rate limit (60/hour unauthenticated vs.
+  5000/hour with a token). **A `.nfc` dump's memory content is
+  effectively a credential for that tag's cloud content** (see
+  `teddycloud_nfc_context.md`), so a private repo is strongly
+  recommended over a public one.
+- **Backup check interval** — how often, in minutes, to re-check the
+  repo (see below). Defaults to 10.
+
+A `.nfc` sidecar upload also requires a configured `teddycloud-nfc-bridge`
+sidecar URL (see above) — without one, matches are found but never
+imported.
+
+**Matching is by filename, not tag identity**: a raw `.nfc` dump carries
+no title of its own — only a physical tag's identity, which is only
+discoverable *after* it's uploaded. So name your backup files after the
+Tonie itself (e.g. `Die Eiskönigin.nfc`); the integration compares each
+not-yet-acquired wishlist item's title against the repo's filenames
+case-insensitively, treating `-`/`_` as spaces (so `die-eiskoenigin.nfc`
+or `Die_Eiskönigin_Teil2.nfc` both match a wishlist title of "Die
+Eiskönigin"). On a match, the file is uploaded through the sidecar to
+**every** box on the server — a physical tag's content isn't box-specific,
+so there's no per-box choice to make.
+
+This check runs automatically: once on Home Assistant startup, and
+afterward at the configured interval (a GitHub directory listing on every
+20-second box poll would be wasteful for a repo that changes rarely). For
+an immediate check right after adding a wishlist item or a new backup
+file, call `POST /api/teddycloud/wishlist/<device_id>/import_from_backups`.
+
 ## Standalone player page
 
 Each Tonie Library entry also carries a `player_url`

@@ -23,6 +23,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
+from .github_nfc_source import GitHubNfcSourceError
+from .wishlist_backup_import import async_import_matching_wishlist_items
 
 
 def _coordinator(request: web.Request, device_id: str):
@@ -117,3 +119,33 @@ class TeddyCloudWishlistItemView(HomeAssistantView):
             return web.Response(status=404)
         await coordinator.wishlist.async_remove(model)
         return web.json_response(coordinator.wishlist.items)
+
+
+class TeddyCloudWishlistImportBackupsView(HomeAssistantView):
+    """Triggers an immediate check of every un-acquired wishlist item
+    against the configured GitHub backup repo (see
+    wishlist_backup_import.async_import_matching_wishlist_items),
+    importing any filename match right away instead of waiting for the
+    next periodic check (coordinator.py's _maybe_import_matching_backups,
+    throttled to once every 10 minutes)."""
+
+    url = "/api/teddycloud/wishlist/{device_id}/import_from_backups"
+    name = "api:teddycloud:wishlist_import_from_backups"
+
+    async def post(self, request: web.Request, device_id: str) -> web.Response:
+        coordinator = _coordinator(request, device_id)
+        if coordinator is None or coordinator.wishlist is None:
+            return web.Response(status=404)
+        if coordinator.github_source is None:
+            return web.json_response({"error": "no_github_source"}, status=404)
+        if coordinator.sidecar_client is None:
+            return web.json_response({"error": "no_sidecar"}, status=404)
+
+        try:
+            attempted = await async_import_matching_wishlist_items(coordinator)
+        except GitHubNfcSourceError as err:
+            return web.Response(status=502, text=str(err))
+
+        if attempted:
+            await coordinator.async_request_refresh()
+        return web.json_response({"attempted": attempted})

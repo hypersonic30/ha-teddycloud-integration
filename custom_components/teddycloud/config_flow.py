@@ -9,14 +9,22 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import selector
 
 from .api import TeddyCloudApiClient, TeddyCloudApiError, build_base_url
 from .const import (
+    CONF_GITHUB_BRANCH,
+    CONF_GITHUB_CHECK_INTERVAL,
+    CONF_GITHUB_PATH,
+    CONF_GITHUB_REPO,
+    CONF_GITHUB_TOKEN,
     CONF_HOST,
     CONF_PORT,
     CONF_SIDECAR_URL,
     CONF_SSL,
     CONF_VERIFY_SSL,
+    DEFAULT_GITHUB_BRANCH,
+    DEFAULT_GITHUB_CHECK_INTERVAL,
     DEFAULT_PORT,
     DEFAULT_SSL,
     DEFAULT_VERIFY_SSL,
@@ -40,6 +48,28 @@ def _schema(defaults: dict) -> vol.Schema:
                 CONF_SIDECAR_URL,
                 default=defaults.get(CONF_SIDECAR_URL, ""),
             ): str,
+            vol.Optional(
+                CONF_GITHUB_REPO,
+                default=defaults.get(CONF_GITHUB_REPO, ""),
+            ): str,
+            vol.Optional(
+                CONF_GITHUB_BRANCH,
+                default=defaults.get(CONF_GITHUB_BRANCH, DEFAULT_GITHUB_BRANCH),
+            ): str,
+            vol.Optional(
+                CONF_GITHUB_PATH,
+                default=defaults.get(CONF_GITHUB_PATH, ""),
+            ): str,
+            vol.Optional(
+                CONF_GITHUB_TOKEN,
+                default=defaults.get(CONF_GITHUB_TOKEN, ""),
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+            ),
+            vol.Optional(
+                CONF_GITHUB_CHECK_INTERVAL,
+                default=defaults.get(CONF_GITHUB_CHECK_INTERVAL, DEFAULT_GITHUB_CHECK_INTERVAL),
+            ): vol.All(int, vol.Range(min=1)),
         }
     )
 

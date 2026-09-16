@@ -3,5 +3,13 @@ __pycache__/
 .DS_Store
 .claude/
 
+# Scratch venv for behavioral tests against a real homeassistant package
+# (see CLAUDE.md's Testing section) - not committed, just installed locally.
+.venv-test/
+.pytest_cache/
+
 # Never commit push credentials
 .git-token-*
+
+# Local-only working notes
+CLAUDE.md

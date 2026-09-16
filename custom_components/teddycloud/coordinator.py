@@ -5,12 +5,14 @@ import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 import logging
+import time
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import TeddyCloudApiClient, TeddyCloudApiError
 from .const import (
+    DEFAULT_GITHUB_CHECK_INTERVAL,
     DOMAIN,
     SETTING_IP,
     SETTING_LAST_CONNECTION,
@@ -18,9 +20,11 @@ from .const import (
     SETTING_ONLINE,
     UPDATE_INTERVAL,
 )
+from .github_nfc_source import GitHubNfcSource
 from .sidecar_api import SidecarApiClient
 from .tonies_catalog import ToniesJsonCatalog
 from .wishlist import Wishlist
+from .wishlist_backup_import import async_import_matching_wishlist_items
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -126,6 +130,8 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
         sidecar_client: SidecarApiClient | None = None,
         wishlist: Wishlist | None = None,
         catalog: ToniesJsonCatalog | None = None,
+        github_source: GitHubNfcSource | None = None,
+        backup_import_check_interval: int = DEFAULT_GITHUB_CHECK_INTERVAL * 60,
     ) -> None:
         super().__init__(
             hass,
@@ -141,10 +147,19 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
         self.wishlist = wishlist
         # Feeds the wishlist's search box - see tonies_catalog.py.
         self.catalog = catalog
+        # Only set when this entry has a GitHub NFC-backup repo configured —
+        # lets the wishlist auto-import (wishlist_backup_import.py) and its
+        # on-demand view work per-entry.
+        self.github_source = github_source
+        # Seconds between GitHub backup-repo checks (config-flow
+        # CONF_GITHUB_CHECK_INTERVAL, in minutes, converted by __init__.py) -
+        # see _maybe_import_matching_backups.
+        self._backup_import_check_interval = backup_import_check_interval
         # Boxes are discovered once on first refresh. A box added to the
         # teddyCloud server later requires reloading the config entry (or
         # restarting HA) to pick up — acceptable for how rarely that happens.
         self.boxes: list[dict] = []
+        self._last_backup_import_check: float = 0.0
 
     async def _async_update_data(self) -> dict[str, TeddyCloudBoxData]:
         if not self.boxes:
@@ -190,8 +205,25 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
             }
             if owned_models:
                 await self.wishlist.async_mark_acquired(owned_models)
+            await self._maybe_import_matching_backups()
 
         return data
+
+    async def _maybe_import_matching_backups(self) -> None:
+        """Throttled wrapper around async_import_matching_wishlist_items() -
+        runs at most once per self._backup_import_check_interval (the
+        config flow's CONF_GITHUB_CHECK_INTERVAL), and must never let a
+        failure here fail the box poll it's piggybacking on."""
+        if self.github_source is None or self.sidecar_client is None:
+            return
+        now = time.monotonic()
+        if now - self._last_backup_import_check < self._backup_import_check_interval:
+            return
+        self._last_backup_import_check = now
+        try:
+            await async_import_matching_wishlist_items(self)
+        except Exception:  # noqa: BLE001 - must never break the regular box poll
+            _LOGGER.exception("teddycloud: automatic NFC backup import check failed")
 
     async def _update_box(self, box: dict) -> TeddyCloudBoxData:
         box_id = box["ID"]

@@ -14,9 +14,9 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_HOST, CONF_SIDECAR_URL, DOMAIN
+from .const import CONF_GITHUB_TOKEN, CONF_HOST, CONF_SIDECAR_URL, DOMAIN
 
-TO_REDACT = {CONF_HOST, CONF_SIDECAR_URL, "ip"}
+TO_REDACT = {CONF_HOST, CONF_SIDECAR_URL, CONF_GITHUB_TOKEN, "ip"}
 
 
 async def async_get_config_entry_diagnostics(
@@ -41,6 +41,7 @@ async def async_get_config_entry_diagnostics(
         {
             "entry_data": dict(entry.data),
             "sidecar_configured": coordinator.sidecar_client is not None,
+            "github_backup_source_configured": coordinator.github_source is not None,
             "box_count": len(coordinator.boxes),
             "boxes": boxes,
         },

@@ -11,9 +11,23 @@ CONF_VERIFY_SSL = "verify_ssl"
 # the assign_nfc_tag service is unavailable for this entry.
 CONF_SIDECAR_URL = "sidecar_url"
 
+# Optional GitHub repo (owner/repo) holding a backup set of .nfc tag dumps.
+# When set, those files are offered as importable "backup" entries in the
+# wishlist (see wishlist.py / github_nfc_source.py) — empty means the
+# feature is unavailable for this entry, same as CONF_SIDECAR_URL.
+CONF_GITHUB_REPO = "github_repo"
+CONF_GITHUB_BRANCH = "github_branch"
+CONF_GITHUB_PATH = "github_path"
+CONF_GITHUB_TOKEN = "github_token"
+# How often (minutes) to re-check un-acquired wishlist items against the
+# GitHub repo - see coordinator.py's _maybe_import_matching_backups.
+CONF_GITHUB_CHECK_INTERVAL = "github_check_interval"
+
 DEFAULT_PORT = 7780
 DEFAULT_SSL = False
 DEFAULT_VERIFY_SSL = True
+DEFAULT_GITHUB_BRANCH = "main"
+DEFAULT_GITHUB_CHECK_INTERVAL = 10
 
 REQUEST_TIMEOUT = 8
 UPDATE_INTERVAL = 20

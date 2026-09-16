@@ -11,6 +11,12 @@ Cross-referenced against the real library on every coordinator refresh
 on its own once teddyCloud actually has it - matched by tonies.json's
 own "model" ID, the same identifier teddyCloud uses internally to look
 up a tag's metadata, rather than fuzzy title matching.
+
+A configured GitHub NFC-backup repo (see github_nfc_source.py and
+wishlist_backup_import.py) doesn't add a new kind of item here - it
+matches *against* these same not-yet-acquired items by title, and
+auto-imports on a hit. This module stays exactly the plain "wanted
+Tonie" list it always was.
 """
 from __future__ import annotations
 

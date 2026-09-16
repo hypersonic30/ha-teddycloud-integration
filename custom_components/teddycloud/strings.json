@@ -9,14 +9,24 @@
           "port": "Port",
           "ssl": "Use HTTPS",
           "verify_ssl": "Verify SSL certificate",
-          "sidecar_url": "NFC-bridge sidecar URL (optional)"
+          "sidecar_url": "NFC-bridge sidecar URL (optional)",
+          "github_repo": "NFC backup GitHub repo (optional)",
+          "github_branch": "GitHub branch",
+          "github_path": "GitHub subfolder (optional)",
+          "github_token": "GitHub token (optional)",
+          "github_check_interval": "Backup check interval (minutes)"
         },
         "data_description": {
           "host": "The hostname or IP address of your teddyCloud server, e.g. 192.168.1.10",
           "port": "The teddyCloud HTTP API port — usually 7780, NOT the HTTPS web UI or Toniebox cloud-emulation port",
           "ssl": "Enable only if teddyCloud's API is served over HTTPS on the port above",
           "verify_ssl": "Disable only if teddyCloud uses a self-signed certificate",
-          "sidecar_url": "Base URL of a teddycloud-nfc-bridge instance, e.g. http://192.168.1.10:8000. Leave empty to skip the assign_nfc_tag service."
+          "sidecar_url": "Base URL of a teddycloud-nfc-bridge instance, e.g. http://192.168.1.10:8000. Leave empty to skip the assign_nfc_tag service.",
+          "github_repo": "owner/repo of a GitHub repo holding .nfc tag backups, e.g. yourname/my-tonie-backups. Leave empty to skip. A .nfc dump's memory content is effectively a credential for that tag's cloud content — a private repo is strongly recommended.",
+          "github_branch": "Branch to read backups from.",
+          "github_path": "Subfolder within the repo to look for .nfc files in. Leave empty to use the repo root.",
+          "github_token": "A GitHub personal access token with read access to the repo. Required for a private repo; optional for a public one, but recommended anyway to avoid GitHub's low unauthenticated rate limit.",
+          "github_check_interval": "How often, in minutes, to check not-yet-acquired wishlist items against the GitHub repo and auto-import any filename match. A repo listing on every poll would be wasteful, so this is separate from the normal box polling interval."
         }
       },
       "reconfigure": {
@@ -27,7 +37,12 @@
           "port": "Port",
           "ssl": "Use HTTPS",
           "verify_ssl": "Verify SSL certificate",
-          "sidecar_url": "NFC-bridge sidecar URL (optional)"
+          "sidecar_url": "NFC-bridge sidecar URL (optional)",
+          "github_repo": "NFC backup GitHub repo (optional)",
+          "github_branch": "GitHub branch",
+          "github_path": "GitHub subfolder (optional)",
+          "github_token": "GitHub token (optional)",
+          "github_check_interval": "Backup check interval (minutes)"
         }
       }
     },

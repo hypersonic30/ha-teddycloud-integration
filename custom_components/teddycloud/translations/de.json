@@ -9,14 +9,24 @@
           "port": "Port",
           "ssl": "HTTPS verwenden",
           "verify_ssl": "SSL-Zertifikat prüfen",
-          "sidecar_url": "NFC-Bridge-Sidecar-URL (optional)"
+          "sidecar_url": "NFC-Bridge-Sidecar-URL (optional)",
+          "github_repo": "GitHub-Repo für NFC-Backups (optional)",
+          "github_branch": "GitHub-Branch",
+          "github_path": "GitHub-Unterordner (optional)",
+          "github_token": "GitHub-Token (optional)",
+          "github_check_interval": "Backup-Prüfintervall (Minuten)"
         },
         "data_description": {
           "host": "Hostname oder IP-Adresse deines teddyCloud-Servers, z. B. 192.168.1.10",
           "port": "Der HTTP-API-Port von teddyCloud — meist 7780, NICHT der HTTPS-Web-UI- oder Toniebox-Cloud-Emulations-Port",
           "ssl": "Nur aktivieren, wenn die teddyCloud-API auf dem obigen Port über HTTPS läuft",
           "verify_ssl": "Nur deaktivieren, wenn teddyCloud ein selbstsigniertes Zertifikat verwendet",
-          "sidecar_url": "Basis-URL einer teddycloud-nfc-bridge-Instanz, z. B. http://192.168.1.10:8000. Leer lassen, um den Dienst assign_nfc_tag nicht zu nutzen."
+          "sidecar_url": "Basis-URL einer teddycloud-nfc-bridge-Instanz, z. B. http://192.168.1.10:8000. Leer lassen, um den Dienst assign_nfc_tag nicht zu nutzen.",
+          "github_repo": "owner/repo eines GitHub-Repos mit .nfc-Tag-Backups, z. B. deinname/meine-tonie-backups. Leer lassen zum Deaktivieren. Der Speicherinhalt eines .nfc-Dumps ist praktisch ein Credential für den Cloud-Inhalt dieses Tags — ein privates Repo wird dringend empfohlen.",
+          "github_branch": "Branch, aus dem die Backups gelesen werden.",
+          "github_path": "Unterordner im Repo, in dem nach .nfc-Dateien gesucht wird. Leer lassen für das Repo-Wurzelverzeichnis.",
+          "github_token": "Ein GitHub Personal Access Token mit Lesezugriff auf das Repo. Erforderlich für ein privates Repo; optional bei einem öffentlichen, aber trotzdem empfohlen, um GitHubs niedriges Rate-Limit für unauthentifizierte Anfragen zu vermeiden.",
+          "github_check_interval": "Wie oft (in Minuten) noch nicht erfüllte Wishlist-Einträge gegen das GitHub-Repo geprüft und passende Dateien automatisch importiert werden. Ein Repo-Listing bei jedem Poll wäre unnötig, daher getrennt vom normalen Box-Poll-Intervall."
         }
       },
       "reconfigure": {
@@ -27,7 +37,12 @@
           "port": "Port",
           "ssl": "HTTPS verwenden",
           "verify_ssl": "SSL-Zertifikat prüfen",
-          "sidecar_url": "NFC-Bridge-Sidecar-URL (optional)"
+          "sidecar_url": "NFC-Bridge-Sidecar-URL (optional)",
+          "github_repo": "GitHub-Repo für NFC-Backups (optional)",
+          "github_branch": "GitHub-Branch",
+          "github_path": "GitHub-Unterordner (optional)",
+          "github_token": "GitHub-Token (optional)",
+          "github_check_interval": "Backup-Prüfintervall (Minuten)"
         }
       }
     },
