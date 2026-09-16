@@ -97,6 +97,18 @@ pass-through:
   playing from the start reads the shared download as it grows, and a
   seek anywhere else waits only until *that specific offset* has
   actually downloaded, not the whole file and not a second download.
+
+  Known, accepted limitation: the download itself is still a single
+  sequential fetch from byte 0 — deliberately never a Range request
+  against teddyCloud, since that's exactly the bug this cache exists to
+  avoid. So a seek ahead of however far that sequential download has
+  currently reached still waits for it to get there; only a seek
+  restarting the *whole* download (the actual bug fixed above) was
+  avoidable without reintroducing risk. Fetching ahead-of-order with
+  targeted Range requests would resolve this too, at the cost of
+  bringing back the same upstream bug for whatever offsets those target
+  — not worth it for what's normally just a brief wait during the first
+  playthrough of a Tonie, gone entirely once it's fully cached.
 - Every Range request (seeking) is served from that cache with a
   correct, from-scratch implementation, never forwarded to teddyCloud's
   own endpoint. That endpoint's embedded HTTP server has a real bug:
