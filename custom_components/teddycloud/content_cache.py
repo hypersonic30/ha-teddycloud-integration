@@ -21,25 +21,45 @@ every Range request ourselves with a correct, from-scratch
 implementation — teddyCloud's own Range logic, and its bug, is never
 exercised again for that Tonie.
 
+Every download for a given key runs as one background task, independent
+of any particular HTTP response - not the earlier design, where the
+download for "playing from the start" lived and died with that one
+response. That mattered in practice: a listener jumping to a chapter
+aborts the original streaming connection (a native <audio> seek cancels
+and replaces its in-flight request), and tying the download to that
+response meant the whole thing restarted from byte zero on every seek,
+which could only ever finish - and therefore only ever answer *any*
+pending Range request, even ones well within what had already
+downloaded - once the entire file had been re-fetched from scratch.
+Now every request for a key, whichever kind, attaches to the one shared
+download (starting it if nothing is running or cached yet) and reads
+whatever part of the growing file it needs as soon as those bytes exist,
+rather than either the whole file or nothing.
+
 Two ways in for a not-yet-cached Tonie, so this doesn't undo the whole
 reason native streaming exists (starting playback without waiting for a
 full download first):
 
 - Playing from the beginning (no Range header, or one starting at byte
-  0) is streamed live from teddyCloud while simultaneously being written
-  to the cache in the background — instant start, forwarding
-  teddyCloud's own Content-Length immediately (if it sends one) so
-  duration/seekability can be determined right away too, even though the
-  body itself is still arriving. Safe: a request for byte 0 never
-  exercises teddyCloud's buggy comparison in the first place (that only
-  misfires near the *end* of a file).
-- A genuine seek into the middle or end of a Tonie that hasn't been
-  cached yet at all (e.g. resuming a saved position before anything has
-  streamed) can't be served this way without risking the bug, so it
-  waits for one full, correctly-cached download instead of forwarding
-  the Range to teddyCloud. Uncommon in practice — the common case is
-  seeking *within* a Tonie already playing, which is always already
-  cached by then.
+  0) attaches to the shared download from its first byte, forwarding
+  teddyCloud's own Content-Length as soon as it's known so duration/
+  seekability can be determined right away too, even though the body
+  itself is still arriving.
+- Seeking to any other offset attaches to the very same shared download
+  (starting one if this is the first request for this Tonie at all) and
+  waits only until *that offset* has actually downloaded - not the whole
+  file - before reading it. Safe with respect to teddyCloud's bug either
+  way: teddyCloud's own Range logic is never exercised for any of this,
+  only our own file reads against the local, already-correctly-ordered
+  copy.
+
+Every filesystem call here runs through hass.async_add_executor_job()
+rather than directly in the event loop - confirmed on a real deployment
+that skipping this isn't just a style nitpick: Home Assistant's own
+blocking-call detector caught a direct open()/write() here, and stream
+stutters/failed chapter jumps were observed alongside it. A blocked event
+loop during a write can't service a concurrent seek request either,
+which plausibly contributed to exactly that.
 """
 from __future__ import annotations
 
@@ -47,33 +67,168 @@ import asyncio
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import AsyncIterator, Awaitable, BinaryIO, Callable
 
 import aiohttp
 from aiohttp import web
+
+from homeassistant.core import HomeAssistant
 
 _CHUNK_SIZE = 65536
 # Bounds disk usage without needing any size-based accounting - a family's
 # worth of recently-played Tonies, not a full mirror of the library.
 _MAX_ENTRIES = 20
+# How long to wait for the upstream's Content-Length before starting a
+# live response without one - long enough for any real server's headers
+# to arrive, short enough not to noticeably delay instant start if it
+# never sends one.
+_SIZE_WAIT_TIMEOUT = 2.0
+
+
+class _Download:
+    """Tracks one in-progress background download of a single cache key -
+    deliberately independent of any particular HTTP response, so a
+    listener seeking away from (and thereby disconnecting) whichever
+    request originally started it doesn't stop the download itself.
+    """
+
+    def __init__(self) -> None:
+        self.bytes_written = 0
+        self.total_size: int | None = None
+        self.error: BaseException | None = None
+        self.done = asyncio.Event()
+        self.size_known = asyncio.Event()
+        self._condition = asyncio.Condition()
+
+    async def wait_until(self, num_bytes: int) -> None:
+        """Block until at least `num_bytes` have been written, or the
+        download has finished (successfully or not) - whichever first."""
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: self.done.is_set() or self.bytes_written >= num_bytes
+            )
+
+    async def _advance(self, bytes_written: int) -> None:
+        async with self._condition:
+            self.bytes_written = bytes_written
+            self._condition.notify_all()
+
+    def _set_total_size(self, size: int) -> None:
+        self.total_size = size
+        self.size_known.set()
+
+    async def _finish(self, error: BaseException | None = None) -> None:
+        self.error = error
+        self.done.set()
+        self.size_known.set()
+        async with self._condition:
+            self._condition.notify_all()
 
 
 class ContentCache:
     """Downloads teddyCloud content once per key and caches it on local
     disk, evicting least-recently-used entries past a small cap.
-    Concurrent requests for the same key share a single download.
+    Concurrent requests for the same key, of any kind (playing from the
+    start, or seeking anywhere), share a single background download.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
         self._dir = Path(tempfile.mkdtemp(prefix="teddycloud_cache_"))
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._downloads: dict[str, _Download] = {}
         self._order: list[str] = []
 
     def _path(self, key: str) -> Path:
         return self._dir / key
 
-    def is_cached(self, key: str) -> bool:
-        return self._path(key).exists()
+    def _tmp_path(self, key: str) -> Path:
+        return self._path(key).with_suffix(".partial")
+
+    async def _exec(self, func, *args):
+        return await self._hass.async_add_executor_job(func, *args)
+
+    async def _exists(self, path: Path) -> bool:
+        return await self._exec(path.exists)
+
+    async def is_cached(self, key: str) -> bool:
+        return await self._exists(self._path(key))
+
+    def _start_download(self, key: str, fetch: Callable[[], Awaitable]) -> _Download:
+        """Return the in-progress download for `key`, starting one as a
+        standalone background task if nothing is already running."""
+        download = self._downloads.get(key)
+        if download is not None:
+            return download
+        download = _Download()
+        self._downloads[key] = download
+        self._hass.async_create_background_task(
+            self._run_download(key, fetch, download), name=f"teddycloud_cache_download_{key}"
+        )
+        return download
+
+    async def _run_download(self, key: str, fetch: Callable[[], Awaitable], download: _Download) -> None:
+        path = self._path(key)
+        tmp_path = self._tmp_path(key)
+        try:
+            async with fetch() as upstream:
+                content_length = upstream.headers.get("Content-Length")
+                if content_length:
+                    download._set_total_size(int(content_length))
+                f = await self._exec(open, tmp_path, "wb")
+                try:
+                    written = 0
+                    async for chunk in upstream.content.iter_chunked(_CHUNK_SIZE):
+                        await self._exec(f.write, chunk)
+                        await self._exec(f.flush)
+                        written += len(chunk)
+                        await download._advance(written)
+                finally:
+                    await self._exec(f.close)
+            await self._exec(tmp_path.rename, path)
+            self._touch(key)
+            await self._evict_if_needed()
+            await download._finish()
+        except (aiohttp.ClientError, TimeoutError, OSError) as err:
+            await self._exec(lambda: tmp_path.unlink(missing_ok=True))
+            await download._finish(err)
+        finally:
+            self._downloads.pop(key, None)
+
+    async def _stream_from(
+        self, key: str, download: _Download, start: int, end: int | None
+    ) -> AsyncIterator[bytes]:
+        """Yield bytes [start, end) of `key`'s content - or, if `end` is
+        None, everything from `start` onward until the download finishes
+        - reading from the growing (or, by the time we open it, possibly
+        already-completed-and-renamed) file backing it."""
+        path = self._path(key)
+        tmp_path = self._tmp_path(key)
+        try:
+            f: BinaryIO = await self._exec(open, tmp_path, "rb")
+        except FileNotFoundError:
+            f = await self._exec(open, path, "rb")
+        try:
+            await self._exec(f.seek, start)
+            sent = start
+            while end is None or sent < end:
+                # Wait for just the *next chunk's* worth of bytes, not the
+                # whole remaining range - waiting for `end` up front here
+                # would (and, before this fix, actually did) block on the
+                # entire rest of the download even when the requested
+                # range starts well before anything still missing.
+                to_read = _CHUNK_SIZE if end is None else min(_CHUNK_SIZE, end - sent)
+                await download.wait_until(sent + to_read)
+                if download.error is not None and download.bytes_written <= sent:
+                    raise download.error
+                chunk = await self._exec(f.read, to_read)
+                if not chunk:
+                    if download.done.is_set():
+                        break
+                    continue
+                sent += len(chunk)
+                yield chunk
+        finally:
+            await self._exec(f.close)
 
     async def serve_live_and_cache(
         self,
@@ -82,111 +237,136 @@ class ContentCache:
         request: web.Request,
         base_headers: dict[str, str],
     ) -> web.StreamResponse:
-        """Build, prepare and return a StreamResponse for `key`, either
-        reading it from a completed cache, waiting for another in-flight
-        download of the same key to finish and reading that, or — the
-        first caller for this key — fetching it live from `fetch()`,
-        forwarding the upstream's own Content-Length (if any) immediately
-        so the client learns duration/seekability without waiting for the
-        transfer to finish, while writing the same bytes to the cache as
-        they arrive."""
+        """Build, prepare and return a StreamResponse streaming `key`'s
+        content from the beginning - reading a completed cache directly,
+        or attaching to a (new or already-running) background download
+        and forwarding its own reported Content-Length as soon as it's
+        known, without waiting for the transfer to finish."""
         path = self._path(key)
 
-        async def serve_from_file() -> web.StreamResponse:
+        if await self._exists(path):
             self._touch(key)
+            size = (await self._exec(path.stat)).st_size
             headers = dict(base_headers)
-            headers["Content-Length"] = str(path.stat().st_size)
+            headers["Content-Length"] = str(size)
             response = web.StreamResponse(status=200, headers=headers)
             await response.prepare(request)
-            async for chunk in self._read_file(path):
+            async for chunk in self.read_file(path):
                 await response.write(chunk)
             await response.write_eof()
             return response
 
-        if path.exists():
-            return await serve_from_file()
+        download = self._start_download(key, fetch)
+        try:
+            await asyncio.wait_for(download.size_known.wait(), timeout=_SIZE_WAIT_TIMEOUT)
+        except TimeoutError:
+            pass
 
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        if lock.locked():
-            async with lock:
-                pass
-            return await serve_from_file()
+        headers = dict(base_headers)
+        if download.total_size is not None:
+            headers["Content-Length"] = str(download.total_size)
+        response = web.StreamResponse(status=200, headers=headers)
+        await response.prepare(request)
+        try:
+            async for chunk in self._stream_from(key, download, start=0, end=None):
+                await response.write(chunk)
+        except (aiohttp.ClientError, TimeoutError):
+            pass  # upstream failed - whatever was already forwarded stands as a partial response
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass  # client disconnected (e.g. seeking away) - the download itself keeps running independently
+        await response.write_eof()
+        return response
 
-        async with lock:
-            if path.exists():
-                return await serve_from_file()
-
-            tmp_path = path.with_suffix(".partial")
-            response: web.StreamResponse | None = None
-            try:
-                async with fetch() as upstream:
-                    headers = dict(base_headers)
-                    content_length = upstream.headers.get("Content-Length")
-                    if content_length:
-                        headers["Content-Length"] = content_length
-                    response = web.StreamResponse(status=200, headers=headers)
-                    await response.prepare(request)
-                    with open(tmp_path, "wb") as f:
-                        async for chunk in upstream.content.iter_chunked(_CHUNK_SIZE):
-                            f.write(chunk)
-                            await response.write(chunk)
-            except (aiohttp.ClientError, TimeoutError):
-                tmp_path.unlink(missing_ok=True)
-                if response is None:
-                    raise
-                await response.write_eof()
-                return response
-
-            tmp_path.rename(path)
+    async def get_range(self, key: str, fetch: Callable[[], Awaitable], start: int, length: int) -> AsyncIterator[bytes]:
+        """Yield bytes [start, start+length) of `key`'s content, starting
+        or reusing a background download and waiting only for that range
+        to become available - not the whole file."""
+        path = self._path(key)
+        if await self._exists(path):
             self._touch(key)
-            self._evict_if_needed()
-            await response.write_eof()
-            return response
+            async for chunk in self.read_range(path, start, length):
+                yield chunk
+            return
+
+        download = self._start_download(key, fetch)
+        async for chunk in self._stream_from(key, download, start, start + length):
+            yield chunk
+
+    async def get_total_size(self, key: str, fetch: Callable[[], Awaitable]) -> int:
+        """Return the total size of `key`'s content, starting/reusing a
+        background download and waiting for it to report Content-Length
+        (or, failing that, finish completely) if not already known."""
+        path = self._path(key)
+        if await self._exists(path):
+            return (await self._exec(path.stat)).st_size
+
+        download = self._start_download(key, fetch)
+        await download.size_known.wait()
+        if download.total_size is not None:
+            return download.total_size
+        if download.error is not None:
+            raise download.error
+        # Upstream never sent Content-Length but did finish - final size
+        # is just the completed file's size.
+        return (await self._exec(path.stat)).st_size
 
     async def ensure_full(self, key: str, fetch: Callable[[], Awaitable]) -> Path:
         """Return the local cached file for `key`, blocking until it's
-        fully downloaded first if it isn't cached (or being cached by
-        serve_live_and_cache) yet."""
+        fully downloaded first if it isn't cached (or being downloaded)
+        yet - for callers like remux_view.py that need the whole file
+        rather than a specific range."""
         path = self._path(key)
-        if path.exists():
+        if await self._exists(path):
             self._touch(key)
             return path
 
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            if not path.exists():
-                tmp_path = path.with_suffix(".partial")
-                async with fetch() as upstream:
-                    with open(tmp_path, "wb") as f:
-                        async for chunk in upstream.content.iter_chunked(_CHUNK_SIZE):
-                            f.write(chunk)
-                tmp_path.rename(path)
-
-        self._touch(key)
-        self._evict_if_needed()
+        download = self._start_download(key, fetch)
+        await download.done.wait()
+        if download.error is not None:
+            raise download.error
         return path
 
-    @staticmethod
-    async def _read_file(path: Path):
-        with open(path, "rb") as f:
+    async def read_file(self, path: Path) -> AsyncIterator[bytes]:
+        """Yield the full contents of `path` in chunks."""
+        f: BinaryIO = await self._exec(open, path, "rb")
+        try:
             while True:
-                chunk = f.read(_CHUNK_SIZE)
+                chunk = await self._exec(f.read, _CHUNK_SIZE)
                 if not chunk:
                     break
                 yield chunk
+        finally:
+            await self._exec(f.close)
+
+    async def size_of(self, path: Path) -> int:
+        return (await self._exec(path.stat)).st_size
+
+    async def read_range(self, path: Path, start: int, length: int) -> AsyncIterator[bytes]:
+        """Yield up to `length` bytes of `path`, starting at byte `start`."""
+        f: BinaryIO = await self._exec(open, path, "rb")
+        try:
+            await self._exec(f.seek, start)
+            remaining = length
+            while remaining > 0:
+                chunk = await self._exec(f.read, min(_CHUNK_SIZE, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+        finally:
+            await self._exec(f.close)
 
     def _touch(self, key: str) -> None:
         if key in self._order:
             self._order.remove(key)
         self._order.append(key)
 
-    def _evict_if_needed(self) -> None:
+    async def _evict_if_needed(self) -> None:
         while len(self._order) > _MAX_ENTRIES:
             oldest = self._order.pop(0)
-            self._path(oldest).unlink(missing_ok=True)
-            self._locks.pop(oldest, None)
+            await self._exec(lambda: self._path(oldest).unlink(missing_ok=True))
 
-    def invalidate(self, key: str) -> None:
+    async def invalidate(self, key: str) -> None:
         """Drop `key`'s cached file, if any.
 
         Needed when a physical tag's content changes without its ruid
@@ -194,14 +374,19 @@ class ContentCache:
         different audio) - otherwise a listener would keep hearing
         whatever was cached under that ruid until it aged out of the LRU
         or Home Assistant restarted.
+
+        Doesn't cancel a download already in flight for this key (rare in
+        practice - it means the tag was reassigned mid-stream) - that
+        download still completes and gets cached under the same key
+        afterward, since cancelling a task safely from here would need
+        more plumbing than this edge case has earned so far.
         """
         if key in self._order:
             self._order.remove(key)
-        self._locks.pop(key, None)
-        self._path(key).unlink(missing_ok=True)
+        await self._exec(lambda: self._path(key).unlink(missing_ok=True))
 
-    def close(self) -> None:
-        shutil.rmtree(self._dir, ignore_errors=True)
+    async def close(self) -> None:
+        await self._exec(lambda: shutil.rmtree(self._dir, ignore_errors=True))
 
 
 def range_start_or_none(range_header: str | None) -> int | None:

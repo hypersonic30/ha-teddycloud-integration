@@ -28,7 +28,7 @@ CONTENT_CACHE_KEY = "_content_cache"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_register_services(hass)
-    hass.data.setdefault(DOMAIN, {})[CONTENT_CACHE_KEY] = ContentCache()
+    hass.data.setdefault(DOMAIN, {})[CONTENT_CACHE_KEY] = ContentCache(hass)
     hass.http.register_view(TeddyCloudStreamView())
     hass.http.register_view(TeddyCloudPlayerView())
     hass.http.register_view(TeddyCloudRemuxView())

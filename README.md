@@ -84,10 +84,19 @@ own — e.g. AirPlay to a device on your local network), and gives every
 Tonie its own local cache (`content_cache.py`) rather than being a pure
 pass-through:
 
-- The first play of a Tonie streams live from teddyCloud while writing
-  the same bytes to disk in the background — no extra wait, and the
-  cache fills in by the time playback would naturally reach any given
-  point.
+- The first play of a Tonie starts one background download for it,
+  shared by every request that comes in for that Tonie afterward — not
+  just the one that started it. That matters because seeking aborts and
+  replaces whichever connection a native `<audio>` element was using
+  (confirmed — that's simply how seeking works); tying a download to one
+  response's lifetime, an earlier version of this cache did, meant every
+  seek restarted the whole download from byte zero, and — since a seek
+  request could then only be answered once *that* entire re-download
+  finished — even a jump to a point already downloaded, or nearly
+  finished downloading, waited for a full redundant transfer first. Now
+  playing from the start reads the shared download as it grows, and a
+  seek anywhere else waits only until *that specific offset* has
+  actually downloaded, not the whole file and not a second download.
 - Every Range request (seeking) is served from that cache with a
   correct, from-scratch implementation, never forwarded to teddyCloud's
   own endpoint. That endpoint's embedded HTTP server has a real bug:
@@ -108,6 +117,12 @@ pass-through:
   own server uses). A handful of most-recently-played Tonies are kept
   (an LRU cache, capped rather than sized) — teddyCloud itself remains
   the actual source of truth.
+
+All of the cache's own disk I/O runs through Home Assistant's executor
+thread pool rather than directly in the event loop — confirmed on a real
+deployment that this isn't just a style nitpick: Home Assistant's own
+blocking-call detector caught a direct file write here, logged alongside
+real playback stutters and failed seeks.
 
 This endpoint deliberately doesn't require a Home Assistant login — the
 same trust model as teddyCloud's own (also unauthenticated) download

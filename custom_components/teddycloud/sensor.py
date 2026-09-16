@@ -138,6 +138,13 @@ class TeddyCloudTonieLibrarySensor(TeddyCloudBoxEntity, SensorEntity):
     _attr_name = "Tonie Library"
     _attr_icon = "mdi:bookshelf"
     _attr_native_unit_of_measurement = "tonies"
+    # The "tonies" attribute (title/cover/stream URL/chapters per Tonie) is
+    # sized for the frontend, not for history: a library with a few dozen
+    # multi-chapter Tonies routinely exceeds the recorder's 16KB per-state
+    # attribute limit, which would otherwise just silently drop the whole
+    # attribute from being recorded (confirmed against a real deployment)
+    # rather than affecting the live state at all.
+    _unrecorded_attributes = frozenset({"tonies"})
 
     def __init__(self, coordinator: TeddyCloudCoordinator, box_id: str) -> None:
         super().__init__(coordinator, box_id)

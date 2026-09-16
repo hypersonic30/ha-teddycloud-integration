@@ -78,7 +78,7 @@ async def _async_assign_nfc_tag(hass: HomeAssistant, call: ServiceCall) -> None:
         if ruid:
             cache = hass.data[DOMAIN].get("_content_cache")
             if cache is not None:
-                cache.invalidate(f"{entry_id}_{box_id}_{ruid}")
+                await cache.invalidate(f"{entry_id}_{box_id}_{ruid}")
 
         await coordinator.async_request_refresh()
 

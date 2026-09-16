@@ -111,13 +111,9 @@ class TeddyCloudRemuxView(HomeAssistantView):
 
         async def feed_stdin() -> None:
             try:
-                with open(path, "rb") as f:
-                    while True:
-                        chunk = f.read(65536)
-                        if not chunk:
-                            break
-                        proc.stdin.write(chunk)
-                        await proc.stdin.drain()
+                async for chunk in cache.read_file(path):
+                    proc.stdin.write(chunk)
+                    await proc.stdin.drain()
             finally:
                 if not proc.stdin.is_closing():
                     proc.stdin.close()

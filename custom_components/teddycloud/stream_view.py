@@ -16,18 +16,21 @@ than forwarded to teddyCloud's own endpoint: its embedded HTTP server has
 a real bug where a seek within the last few KB of a file can silently
 return the wrong bytes while still claiming the requested range in its
 (already-sent) response headers — confirmed on real iOS hardware via a
-MEDIA_ERR_DECODE. Two paths in, so this doesn't cost native streaming's
-whole reason for existing (instant start):
+MEDIA_ERR_DECODE. Playing from the start and seeking both attach to the
+same shared background download for a given Tonie (content_cache.py
+starts one if nothing is running or cached yet): playback from byte 0
+gets teddyCloud's own Content-Length as soon as it's known, without
+waiting for the transfer to finish, and a seek anywhere else waits only
+until *that specific offset* has actually downloaded - not the whole
+file, and not forwarded to teddyCloud's buggy Range logic either way.
 
-- Playing from the beginning (no Range, or one starting at byte 0) is
-  streamed live from teddyCloud while being cached in the background —
-  no wait, and safe, since byte 0 never exercises teddyCloud's buggy
-  comparison (that only misfires near the end of a file).
-- A seek into the middle/end of a Tonie that hasn't been cached at all
-  yet waits for one full, correctly-cached download instead of
-  forwarding the Range — uncommon, since seeking *within* an
-  already-playing Tonie (the common case) is always already cached by
-  then.
+This matters because a seek aborts and replaces the in-flight connection
+a native <audio> element was using (confirmed - that's just how seeking
+works) — tying a download to one response's lifetime, an earlier version
+of this file did, meant every seek restarted the whole download from
+byte zero, and any pending request (including the seek itself) could
+only ever be answered once that whole re-download finished. Decoupling
+the download from any one response fixes that.
 """
 from __future__ import annotations
 
@@ -45,7 +48,6 @@ from .content_cache import parse_range, range_start_or_none
 _LOGGER = logging.getLogger(__name__)
 
 _HEX_CHARS = set("0123456789abcdefABCDEF")
-_CHUNK_SIZE = 65536
 
 
 class TeddyCloudStreamView(HomeAssistantView):
@@ -79,7 +81,7 @@ class TeddyCloudStreamView(HomeAssistantView):
         range_header = request.headers.get("Range")
         start = range_start_or_none(range_header)
 
-        if not cache.is_cached(key) and start == 0:
+        if not await cache.is_cached(key) and start == 0:
             base_headers = {"Content-Type": "audio/ogg", "Accept-Ranges": "bytes"}
             try:
                 return await cache.serve_live_and_cache(key, fetch, request, base_headers)
@@ -88,12 +90,11 @@ class TeddyCloudStreamView(HomeAssistantView):
                 return web.Response(status=502)
 
         try:
-            path = await cache.ensure_full(key, fetch)
+            size = await cache.get_total_size(key, fetch)
         except (aiohttp.ClientError, TimeoutError) as err:
             _LOGGER.debug("teddycloud: stream cache fetch failed for ruid %s: %s", ruid, err)
             return web.Response(status=502)
 
-        size = path.stat().st_size
         try:
             rng = parse_range(range_header, size)
         except ValueError:
@@ -115,14 +116,10 @@ class TeddyCloudStreamView(HomeAssistantView):
 
         response = web.StreamResponse(status=status, headers=headers)
         await response.prepare(request)
-        with open(path, "rb") as f:
-            f.seek(start)
-            remaining = length
-            while remaining > 0:
-                data = f.read(min(_CHUNK_SIZE, remaining))
-                if not data:
-                    break
-                remaining -= len(data)
-                await response.write(data)
+        try:
+            async for chunk in cache.get_range(key, fetch, start, length):
+                await response.write(chunk)
+        except (aiohttp.ClientError, TimeoutError):
+            pass  # upstream failed - whatever was already forwarded stands as a partial response
         await response.write_eof()
         return response
