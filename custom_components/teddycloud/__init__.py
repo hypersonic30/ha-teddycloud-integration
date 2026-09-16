@@ -104,22 +104,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_config_entry_first_refresh()
 
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
     if github_source is not None and sidecar_client is not None:
-        # Best-effort: a wishlist item that already has a backup available
-        # should get restored without the user needing to remember to
-        # trigger anything after every restart, but GitHub/sidecar trouble
-        # must never fail entry setup - the periodic in-coordinator check
+        # Best-effort and backgrounded, not awaited: a wishlist item that
+        # already has a backup available should get restored without the
+        # user needing to trigger anything after every restart, but this
+        # must never delay entry setup (getting entities on screen) - a
+        # GitHub repo with many subfolders can add real wall-clock time
+        # even parallelized (see github_nfc_source.py's _list_dir), and
+        # config entry setup previously awaited this inline, which is
+        # exactly what made "why does this integration take so long to
+        # load" reports about. GitHub/sidecar trouble here must also never
+        # fail entry setup - the periodic in-coordinator check
         # (coordinator.py's _maybe_import_matching_backups) and the
         # on-demand view (TeddyCloudWishlistImportBackupsView) stay
         # available either way.
-        try:
-            await async_import_matching_wishlist_items(coordinator)
-        except Exception:  # noqa: BLE001 - must never fail entry setup
-            _LOGGER.exception("teddycloud: startup NFC backup import check failed")
+        hass.async_create_background_task(
+            _async_startup_backup_import_check(coordinator),
+            name=f"teddycloud_startup_backup_import_{entry.entry_id}",
+        )
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_startup_backup_import_check(coordinator: TeddyCloudCoordinator) -> None:
+    try:
+        await async_import_matching_wishlist_items(coordinator)
+    except Exception:  # noqa: BLE001 - background task, must never raise
+        _LOGGER.exception("teddycloud: startup NFC backup import check failed")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -18,6 +18,7 @@ This module never talks to that sidecar itself.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 
@@ -94,19 +95,33 @@ class GitHubNfcSource:
         path relative to the configured self._path folder instead (what
         fetch_nfc_file() and wishlist matching actually want) - a backup
         repo is commonly organized into one folder per person/series
-        rather than kept flat, so this doesn't stop at the first level."""
+        rather than kept flat, so this doesn't stop at the first level.
+
+        Sibling subfolders are recursed into concurrently (asyncio.gather),
+        not one at a time - a repo with many subfolders (one API round
+        trip each) would otherwise add up to real, blocking latency during
+        config entry setup."""
         entries = await self._get_json(self._contents_url(repo_path))
         if not isinstance(entries, list):
             raise GitHubNfcSourceError(f"{self._path or '/'} is not a folder in {self._repo}")
+
         names: list[str] = []
+        subdirs: list[tuple[str, str]] = []
         for entry in entries:
             name = entry.get("name", "")
             child_repo_path = f"{repo_path}/{name}" if repo_path else name
             child_rel_path = f"{rel_path}/{name}" if rel_path else name
             if entry.get("type") == "dir":
-                names.extend(await self._list_dir(child_repo_path, child_rel_path))
+                subdirs.append((child_repo_path, child_rel_path))
             elif entry.get("type") == "file" and name.lower().endswith(".nfc"):
                 names.append(child_rel_path)
+
+        if subdirs:
+            for sub_names in await asyncio.gather(
+                *(self._list_dir(child_repo_path, child_rel_path) for child_repo_path, child_rel_path in subdirs)
+            ):
+                names.extend(sub_names)
+
         return names
 
     async def list_nfc_files(self) -> list[str]:
