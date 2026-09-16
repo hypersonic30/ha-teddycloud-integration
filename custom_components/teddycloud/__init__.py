@@ -15,6 +15,13 @@ from .player_view import TeddyCloudPlayerView
 from .remux_view import TeddyCloudRemuxView
 from .sidecar_api import SidecarApiClient
 from .stream_view import TeddyCloudStreamView
+from .tonies_catalog import ToniesJsonCatalog
+from .wishlist import Wishlist
+from .wishlist_views import (
+    TeddyCloudCatalogSearchView,
+    TeddyCloudWishlistItemView,
+    TeddyCloudWishlistView,
+)
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.SELECT]
 
@@ -32,6 +39,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(TeddyCloudStreamView())
     hass.http.register_view(TeddyCloudPlayerView())
     hass.http.register_view(TeddyCloudRemuxView())
+    hass.http.register_view(TeddyCloudCatalogSearchView())
+    hass.http.register_view(TeddyCloudWishlistView())
+    hass.http.register_view(TeddyCloudWishlistItemView())
     return True
 
 
@@ -42,7 +52,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sidecar_url = entry.data.get(CONF_SIDECAR_URL)
     sidecar_client = SidecarApiClient(hass, sidecar_url) if sidecar_url else None
 
-    coordinator = TeddyCloudCoordinator(hass, client, entry.entry_id, sidecar_client)
+    wishlist = Wishlist(hass, entry.entry_id)
+    await wishlist.async_load()
+    catalog = ToniesJsonCatalog(client)
+
+    coordinator = TeddyCloudCoordinator(
+        hass, client, entry.entry_id, sidecar_client, wishlist=wishlist, catalog=catalog
+    )
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

@@ -113,6 +113,16 @@ class TeddyCloudApiClient:
             return []
         return data.get("tags", [])
 
+    async def get_tonies_json_catalog(self) -> list[dict]:
+        """Return teddyCloud's full tonies.json catalog: every officially
+        released Tonie it knows about (several thousand entries), not
+        just ones already in a box's library - teddyCloud downloads and
+        keeps this updated from api.revvox.de on its own. Used for the
+        wishlist feature (browsing/searching Tonies not yet owned).
+        """
+        data = await self._get_json("/api/toniesJson")
+        return data if isinstance(data, list) else []
+
     def build_url(self, path: str) -> str:
         """Turn a server-relative path from an API response into an absolute URL."""
         return f"{self._base_url}{path}"

@@ -19,6 +19,8 @@ from .const import (
     UPDATE_INTERVAL,
 )
 from .sidecar_api import SidecarApiClient
+from .tonies_catalog import ToniesJsonCatalog
+from .wishlist import Wishlist
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,6 +97,11 @@ def _build_library(tags: list[dict], entry_id: str, box_id: str) -> list[dict]:
                 "series": info.get("series") or None,
                 "picture": info.get("picture"),
                 "chapters": chapters,
+                # tonies.json's own identifier for this Tonie, when
+                # recognized (None for a custom/unrecognized one) - lets
+                # the wishlist (wishlist.py) match "do we now own this"
+                # by a stable ID instead of fuzzy title comparison.
+                "model": info.get("model") or None,
                 "audio_url": f"/api/teddycloud/stream/{entry_id}/{box_id}/{ruid}",
                 # A standalone player page (see player_view.py), meant to be
                 # opened in its own tab rather than played inline: a full HA
@@ -117,6 +124,8 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
         client: TeddyCloudApiClient,
         entry_id: str,
         sidecar_client: SidecarApiClient | None = None,
+        wishlist: Wishlist | None = None,
+        catalog: ToniesJsonCatalog | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -129,6 +138,9 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
         # Only set when this entry has a teddycloud-nfc-bridge sidecar URL
         # configured — lets the assign_nfc_tag service work per-entry.
         self.sidecar_client = sidecar_client
+        self.wishlist = wishlist
+        # Feeds the wishlist's search box - see tonies_catalog.py.
+        self.catalog = catalog
         # Boxes are discovered once on first refresh. A box added to the
         # teddyCloud server later requires reloading the config entry (or
         # restarting HA) to pick up — acceptable for how rarely that happens.
@@ -168,6 +180,16 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
             if isinstance(result, BaseException):
                 raise result
             data[box_id] = result
+
+        if self.wishlist is not None:
+            owned_models = {
+                tonie["model"]
+                for box_data in data.values()
+                for tonie in box_data.library
+                if tonie.get("model")
+            }
+            if owned_models:
+                await self.wishlist.async_mark_acquired(owned_models)
 
         return data
 
