@@ -184,14 +184,24 @@ the `<audio>` element gets two `<source>` children, the local copy first
 AirPlay fallback.
 
 **Chapters, lock-screen seeking, and resuming.** teddyCloud's own
-per-track start offsets (`getTagIndex`'s `trackSeconds`, already used
-internally the same way by teddyCloud's own C server) show up as a
-prev/next chapter row on the page whenever a Tonie has more than one
-track, and as working previous/next-track buttons on the lock screen too.
-±15s skip buttons are wired up on the lock screen regardless. Playback
-position is remembered per Tonie (`localStorage`) across separate visits
-to the page, so reopening one you were partway through picks up close to
-where you left off rather than restarting at 0.
+per-track start offsets (`getTagIndex`'s `trackSeconds`, computed from
+the actual audio file, the same way teddyCloud's own C server does it
+internally) show up, whenever a Tonie has more than one track, as:
+
+- a prev/next chapter row on the page itself, plus a tappable list below
+  it with every chapter — jump straight to any of them instead of
+  skipping one at a time. Titled with the real track name when
+  available (a *separate* source from the offsets — teddyCloud's
+  community tonies.json catalog, which only covers recognized official
+  Tonies — so a custom/ripped Tonie's chapters just show as "Chapter N"
+  instead);
+- working previous/next-track buttons on the lock screen — standard
+  `MediaSession` behavior, no extra permissions needed.
+
+±15s skip buttons are wired up on the lock screen regardless of chapter
+count. Playback position is remembered per Tonie (`localStorage`) across
+separate visits to the page, so reopening one you were partway through
+picks up close to where you left off rather than restarting at 0.
 
 Known limitation, an upstream teddyCloud bug (not something this
 integration's proxy is exposed to, per the caching above, but worth

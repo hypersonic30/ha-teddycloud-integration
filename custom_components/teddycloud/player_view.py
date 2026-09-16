@@ -107,7 +107,7 @@ def _render(
     stream_url: str,
     remux_url: str,
     ruid: str,
-    chapters: list[float] | None = None,
+    chapters: list[dict] | None = None,
 ) -> str:
     safe_title = html.escape(title)
     safe_picture_attr = html.escape(picture) if picture else None
@@ -116,7 +116,7 @@ def _render(
     js_stream_url = _json_for_script(stream_url)
     js_remux_url = _json_for_script(remux_url)
     js_ruid = _json_for_script(ruid)
-    js_chapters = _json_for_script(sorted(chapters or []))
+    js_chapters = _json_for_script(sorted(chapters or [], key=lambda c: c["start"]))
 
     cover_html = f'<img src="{safe_picture_attr}" alt="">' if safe_picture_attr else ""
 
@@ -144,6 +144,15 @@ def _render(
     font-size: 1.1rem; padding: 6px 14px; cursor: pointer;
   }}
   #chapterLabel {{ font-size: 0.85rem; color: #aaa; min-width: 5em; }}
+  #chapterList {{
+    display: flex; flex-direction: column; gap: 4px; width: min(90vw, 400px);
+    max-height: 40vh; overflow-y: auto;
+  }}
+  #chapterList button {{
+    background: #1a1a1a; color: #eee; border: 1px solid #333; border-radius: 8px;
+    font-size: 0.9rem; padding: 8px 12px; cursor: pointer; text-align: left;
+  }}
+  #chapterList button.current {{ background: #2a4; border-color: #2a4; font-weight: 600; }}
 </style>
 </head>
 <body>
@@ -156,6 +165,7 @@ def _render(
     <span id="chapterLabel"></span>
     <button id="nextChapter" type="button">⏭</button>
   </div>
+  <div id="chapterList" hidden></div>
   <div id="debug"></div>
   <script>
     const statusEl = document.getElementById("status");
@@ -165,32 +175,40 @@ def _render(
     // Safari's remote Web Inspector - just look at the page.
     const debugEl = document.getElementById("debug");
 
-    // Per-track start offsets (seconds), straight from teddyCloud's own
-    // getTagIndex response - lets chapter navigation work with no extra
-    // parsing here at all. Empty for a Tonie with only one track.
+    // Per-track start offsets (seconds) plus, when available, a real
+    // title - both straight from teddyCloud's own getTagIndex response,
+    // no extra parsing needed here. Offsets come from parsing the actual
+    // audio file, so they're always present for a multi-track Tonie;
+    // titles come from a *separate* source (teddyCloud's community
+    // tonies.json catalog, only for recognized official Tonies) and can
+    // be missing (null) for some or all chapters - falls back to a plain
+    // "Chapter N" label in that case. Empty array for a single-track Tonie.
     const CHAPTERS = {js_chapters};
 
     function currentChapterIndex() {{
       let idx = 0;
       for (let i = 0; i < CHAPTERS.length; i++) {{
-        if (CHAPTERS[i] <= audio.currentTime + 0.5) idx = i;
+        if (CHAPTERS[i].start <= audio.currentTime + 0.5) idx = i;
         else break;
       }}
       return idx;
     }}
     function seekToChapter(idx) {{
       if (idx < 0 || idx >= CHAPTERS.length) return;
-      audio.currentTime = CHAPTERS[idx];
+      audio.currentTime = CHAPTERS[idx].start;
     }}
     function prevChapter() {{
       const idx = currentChapterIndex();
       // More than 3s into the current chapter: restart it instead of
       // jumping to the previous one, matching how "previous track"
       // behaves on most players.
-      seekToChapter(audio.currentTime - CHAPTERS[idx] > 3 ? idx : idx - 1);
+      seekToChapter(audio.currentTime - CHAPTERS[idx].start > 3 ? idx : idx - 1);
     }}
     function nextChapter() {{
       seekToChapter(currentChapterIndex() + 1);
+    }}
+    function chapterLabelText(i) {{
+      return CHAPTERS[i].title || `Chapter ${{i + 1}}`;
     }}
 
     if (CHAPTERS.length > 1) {{
@@ -199,8 +217,29 @@ def _render(
       document.getElementById("prevChapter").addEventListener("click", prevChapter);
       document.getElementById("nextChapter").addEventListener("click", nextChapter);
       const chapterLabel = document.getElementById("chapterLabel");
+
+      // Full tappable list, so a chapter far ahead is one tap away
+      // instead of repeated skipping with prev/next.
+      const listEl = document.getElementById("chapterList");
+      listEl.hidden = false;
+      const listButtons = CHAPTERS.map((chapter, i) => {{
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = chapterLabelText(i);
+        btn.addEventListener("click", () => seekToChapter(i));
+        listEl.append(btn);
+        return btn;
+      }});
+
+      let lastHighlighted = -1;
       audio.addEventListener("timeupdate", () => {{
-        chapterLabel.textContent = `${{currentChapterIndex() + 1}} / ${{CHAPTERS.length}}`;
+        const idx = currentChapterIndex();
+        chapterLabel.textContent = `${{idx + 1}} / ${{CHAPTERS.length}}`;
+        if (idx !== lastHighlighted) {{
+          if (lastHighlighted >= 0) listButtons[lastHighlighted].classList.remove("current");
+          listButtons[idx].classList.add("current");
+          lastHighlighted = idx;
+        }}
       }});
     }}
 

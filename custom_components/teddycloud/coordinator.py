@@ -71,10 +71,23 @@ def _build_library(tags: list[dict], entry_id: str, box_id: str) -> list[dict]:
         info = tag.get("tonieInfo") or {}
         title = info.get("episode") or info.get("series") or ruid
         # Per-track start offsets (seconds), straight from teddyCloud's own
-        # Ogg granule-position parsing (same data getTagInfo's tracks list
-        # describes) - lets the player page offer chapter navigation without
-        # any extra parsing of its own.
-        chapters = [s for s in (tag.get("trackSeconds") or []) if isinstance(s, (int, float))]
+        # Ogg granule-position parsing of the actual audio file. Paired up
+        # with track titles when available - a *separate*, independent
+        # source: teddyCloud's community tonies.json catalog, keyed by
+        # model ID, so it only exists for recognized official Tonies and
+        # can disagree in count with the real track offsets (a custom/
+        # unrecognized Tonie has no titles at all; zip() stops at the
+        # shorter list, leaving any extra chapters titled None).
+        starts = sorted(s for s in (tag.get("trackSeconds") or []) if isinstance(s, (int, float)))
+        raw_titles = info.get("tracks")
+        titles = raw_titles if isinstance(raw_titles, list) else []
+        chapters = [
+            {
+                "start": start,
+                "title": titles[i] if i < len(titles) and isinstance(titles[i], str) and titles[i] else None,
+            }
+            for i, start in enumerate(starts)
+        ]
         library.append(
             {
                 "ruid": ruid,
