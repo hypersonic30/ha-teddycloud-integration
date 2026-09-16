@@ -23,9 +23,18 @@ even with no special flags (unlike fragmented MP4, which needed explicit
 confirmed by counting Cluster IDs (0x1F43B675) in real output: roughly one
 per second of audio for a 60-second test file.
 
-teddyCloud's stream is piped into ffmpeg's stdin and its stdout piped
-back to the HTTP client concurrently (both directions have to be pumped
-at once — feeding stdin without draining stdout risks ffmpeg's output
+The input comes from content_cache.py's local cache rather than a live
+fetch from teddyCloud (shared with stream_view.py) — if this Tonie has
+already been played via the native-streaming path, the content is
+already on disk and this starts remuxing immediately with no network
+wait at all; on a cold start it downloads once first. This path is now
+only a fallback for when native streaming itself fails to load, so
+trading the old "start remuxing before the download finishes" behavior
+for a shared, consistent cache was worth it.
+
+The cached file is piped into ffmpeg's stdin and its stdout piped back
+to the HTTP client concurrently (both directions have to be pumped at
+once — feeding stdin without draining stdout risks ffmpeg's output
 buffer filling up and blocking, which would stall the input side too).
 """
 from __future__ import annotations
@@ -74,6 +83,18 @@ class TeddyCloudRemuxView(HomeAssistantView):
         if len(ruid) != 16 or not all(c in _HEX_CHARS for c in ruid):
             return web.Response(status=400, text="Invalid ruid")
 
+        cache = hass.data[DOMAIN]["_content_cache"]
+        key = f"{entry_id}_{overlay}_{ruid}"
+
+        def fetch():
+            return coordinator.client.open_content_stream(ruid, overlay, None)
+
+        try:
+            path = await cache.ensure_full(key, fetch)
+        except (aiohttp.ClientError, TimeoutError) as err:
+            _LOGGER.error("teddycloud: could not fetch content for remux (%s): %s", ruid, err)
+            return web.Response(status=502)
+
         ffmpeg_binary = get_ffmpeg_manager(hass).binary
 
         try:
@@ -90,14 +111,13 @@ class TeddyCloudRemuxView(HomeAssistantView):
 
         async def feed_stdin() -> None:
             try:
-                async with coordinator.client.open_content_stream(
-                    ruid, overlay, None
-                ) as upstream:
-                    async for chunk in upstream.content.iter_chunked(65536):
+                with open(path, "rb") as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
                         proc.stdin.write(chunk)
                         await proc.stdin.drain()
-            except (aiohttp.ClientError, ConnectionError, TimeoutError) as err:
-                _LOGGER.debug("teddycloud: remux input feed failed for %s: %s", ruid, err)
             finally:
                 if not proc.stdin.is_closing():
                     proc.stdin.close()

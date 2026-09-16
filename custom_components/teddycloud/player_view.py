@@ -79,11 +79,13 @@ class TeddyCloudPlayerView(HomeAssistantView):
 
         title = tonie["title"] if tonie else ruid
         picture = tonie.get("picture") if tonie else None
+        chapters = tonie.get("chapters") if tonie else []
         stream_url = f"/api/teddycloud/stream/{entry_id}/{overlay}/{ruid}"
         remux_url = f"/api/teddycloud/remux/{entry_id}/{overlay}/{ruid}"
 
         return web.Response(
-            text=_render(title, picture, stream_url, remux_url), content_type="text/html"
+            text=_render(title, picture, stream_url, remux_url, ruid, chapters),
+            content_type="text/html",
         )
 
 
@@ -99,13 +101,22 @@ def _json_for_script(value) -> str:
     return json.dumps(value).replace("<", "\\u003c")
 
 
-def _render(title: str, picture: str | None, stream_url: str, remux_url: str) -> str:
+def _render(
+    title: str,
+    picture: str | None,
+    stream_url: str,
+    remux_url: str,
+    ruid: str,
+    chapters: list[float] | None = None,
+) -> str:
     safe_title = html.escape(title)
     safe_picture_attr = html.escape(picture) if picture else None
     js_title = _json_for_script(title)
     js_artwork = _json_for_script([{"src": picture}] if picture else [])
     js_stream_url = _json_for_script(stream_url)
     js_remux_url = _json_for_script(remux_url)
+    js_ruid = _json_for_script(ruid)
+    js_chapters = _json_for_script(sorted(chapters or []))
 
     cover_html = f'<img src="{safe_picture_attr}" alt="">' if safe_picture_attr else ""
 
@@ -127,6 +138,12 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
   audio {{ width: min(90vw, 400px); }}
   #status {{ font-size: 0.9rem; color: #aaa; }}
   #debug {{ font-size: 0.75rem; color: #777; max-width: 90vw; word-break: break-word; }}
+  #chapters {{ display: flex; align-items: center; gap: 16px; }}
+  #chapters button {{
+    background: #222; color: #eee; border: 1px solid #444; border-radius: 8px;
+    font-size: 1.1rem; padding: 6px 14px; cursor: pointer;
+  }}
+  #chapterLabel {{ font-size: 0.85rem; color: #aaa; min-width: 5em; }}
 </style>
 </head>
 <body>
@@ -134,6 +151,11 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
   <h1>{safe_title}</h1>
   <div id="status">Loading…</div>
   <audio id="a" controls></audio>
+  <div id="chapters" hidden>
+    <button id="prevChapter" type="button">⏮</button>
+    <span id="chapterLabel"></span>
+    <button id="nextChapter" type="button">⏭</button>
+  </div>
   <div id="debug"></div>
   <script>
     const statusEl = document.getElementById("status");
@@ -143,6 +165,45 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
     // Safari's remote Web Inspector - just look at the page.
     const debugEl = document.getElementById("debug");
 
+    // Per-track start offsets (seconds), straight from teddyCloud's own
+    // getTagIndex response - lets chapter navigation work with no extra
+    // parsing here at all. Empty for a Tonie with only one track.
+    const CHAPTERS = {js_chapters};
+
+    function currentChapterIndex() {{
+      let idx = 0;
+      for (let i = 0; i < CHAPTERS.length; i++) {{
+        if (CHAPTERS[i] <= audio.currentTime + 0.5) idx = i;
+        else break;
+      }}
+      return idx;
+    }}
+    function seekToChapter(idx) {{
+      if (idx < 0 || idx >= CHAPTERS.length) return;
+      audio.currentTime = CHAPTERS[idx];
+    }}
+    function prevChapter() {{
+      const idx = currentChapterIndex();
+      // More than 3s into the current chapter: restart it instead of
+      // jumping to the previous one, matching how "previous track"
+      // behaves on most players.
+      seekToChapter(audio.currentTime - CHAPTERS[idx] > 3 ? idx : idx - 1);
+    }}
+    function nextChapter() {{
+      seekToChapter(currentChapterIndex() + 1);
+    }}
+
+    if (CHAPTERS.length > 1) {{
+      const chaptersEl = document.getElementById("chapters");
+      chaptersEl.hidden = false;
+      document.getElementById("prevChapter").addEventListener("click", prevChapter);
+      document.getElementById("nextChapter").addEventListener("click", nextChapter);
+      const chapterLabel = document.getElementById("chapterLabel");
+      audio.addEventListener("timeupdate", () => {{
+        chapterLabel.textContent = `${{currentChapterIndex() + 1}} / ${{CHAPTERS.length}}`;
+      }});
+    }}
+
     if ("mediaSession" in navigator) {{
       navigator.mediaSession.metadata = new MediaMetadata({{
         title: {js_title},
@@ -151,7 +212,62 @@ def _render(title: str, picture: str | None, stream_url: str, remux_url: str) ->
       }});
       audio.addEventListener("play", () => {{ navigator.mediaSession.playbackState = "playing"; }});
       audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
+      // ±15s and, where there's more than one track, lock-screen
+      // previous/next-track buttons wired to real chapter navigation
+      // instead of doing nothing.
+      navigator.mediaSession.setActionHandler("seekbackward", (details) => {{
+        audio.currentTime = Math.max(0, audio.currentTime - (details.seekOffset || 15));
+      }});
+      navigator.mediaSession.setActionHandler("seekforward", (details) => {{
+        audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + (details.seekOffset || 15));
+      }});
+      if (CHAPTERS.length > 1) {{
+        navigator.mediaSession.setActionHandler("previoustrack", prevChapter);
+        navigator.mediaSession.setActionHandler("nexttrack", nextChapter);
+      }}
     }}
+
+    // Resume where playback left off last time, across separate visits to
+    // this page (a closed tab, a reloaded phone) - plain localStorage,
+    // keyed by ruid. Only applied once per page load, and only if the
+    // saved position is actually reachable yet (audio.seekable) - the MSE
+    // fallback path in particular can't seek ahead of what it has
+    // buffered so far, so this safely does nothing there rather than
+    // stalling on an unreachable seek.
+    const RESUME_KEY = "teddycloud_resume_" + {js_ruid};
+    let resumeApplied = false;
+    let lastSavedPosition = -1;
+    audio.addEventListener("loadedmetadata", () => {{
+      if (resumeApplied) return;
+      resumeApplied = true;
+      try {{
+        const saved = parseFloat(localStorage.getItem(RESUME_KEY));
+        if (!(saved > 5)) return;
+        if (audio.duration && saved > audio.duration - 5) return;
+        const seekable = audio.seekable;
+        const reachable = seekable.length > 0 && saved <= seekable.end(seekable.length - 1);
+        if (reachable) audio.currentTime = saved;
+      }} catch (err) {{
+        // localStorage/seekable can throw (private window, blocked
+        // storage) - starting from 0 is a perfectly safe fallback.
+      }}
+    }});
+    audio.addEventListener("timeupdate", () => {{
+      if (Math.abs(audio.currentTime - lastSavedPosition) < 5) return;
+      lastSavedPosition = audio.currentTime;
+      try {{
+        localStorage.setItem(RESUME_KEY, String(audio.currentTime));
+      }} catch (err) {{
+        // ignore - see above
+      }}
+    }});
+    audio.addEventListener("ended", () => {{
+      try {{
+        localStorage.removeItem(RESUME_KEY);
+      }} catch (err) {{
+        // ignore - see above
+      }}
+    }});
 
     // Persistent diagnostics for whatever happens *after* a playback path
     // has already succeeded - e.g. a later seek failing. None of the

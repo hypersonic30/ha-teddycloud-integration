@@ -70,12 +70,18 @@ def _build_library(tags: list[dict], entry_id: str, box_id: str) -> list[dict]:
             continue
         info = tag.get("tonieInfo") or {}
         title = info.get("episode") or info.get("series") or ruid
+        # Per-track start offsets (seconds), straight from teddyCloud's own
+        # Ogg granule-position parsing (same data getTagInfo's tracks list
+        # describes) - lets the player page offer chapter navigation without
+        # any extra parsing of its own.
+        chapters = [s for s in (tag.get("trackSeconds") or []) if isinstance(s, (int, float))]
         library.append(
             {
                 "ruid": ruid,
                 "title": title,
                 "series": info.get("series") or None,
                 "picture": info.get("picture"),
+                "chapters": chapters,
                 "audio_url": f"/api/teddycloud/stream/{entry_id}/{box_id}/{ruid}",
                 # A standalone player page (see player_view.py), meant to be
                 # opened in its own tab rather than played inline: a full HA

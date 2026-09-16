@@ -8,6 +8,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .api import TeddyCloudApiClient, build_base_url
 from .const import CONF_HOST, CONF_PORT, CONF_SIDECAR_URL, CONF_SSL, CONF_VERIFY_SSL, DOMAIN
+from .content_cache import ContentCache
 from .coordinator import TeddyCloudCoordinator
 from .services import async_register_services
 from .player_view import TeddyCloudPlayerView
@@ -19,9 +20,15 @@ PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH, Platform.
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
+# Key for the single, integration-wide ContentCache instance inside
+# hass.data[DOMAIN] — shared by stream_view.py and remux_view.py, kept
+# separate from the per-entry coordinators also stored there.
+CONTENT_CACHE_KEY = "_content_cache"
+
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async_register_services(hass)
+    hass.data.setdefault(DOMAIN, {})[CONTENT_CACHE_KEY] = ContentCache()
     hass.http.register_view(TeddyCloudStreamView())
     hass.http.register_view(TeddyCloudPlayerView())
     hass.http.register_view(TeddyCloudRemuxView())

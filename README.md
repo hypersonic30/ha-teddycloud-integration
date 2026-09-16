@@ -71,17 +71,42 @@ Polling runs every 20 seconds.
 ## Audio streaming proxy
 
 The Tonie Library sensor's audio URLs point at this integration's own
-`/api/teddycloud/stream/...` endpoint rather than straight at teddyCloud. It
-proxies the same bytes teddyCloud itself serves, only correcting the
-`Content-Type` header (teddyCloud sends a generic one, which browsers ignore
-in favor of the ha-teddycloud-card's own type hint, but which breaks
-playback for anything that fetches the stream on its own — e.g. AirPlay to
-a device on your local network). Nothing is buffered or stored: it's a
-pure pass-through, streamed live, per request.
+`/api/teddycloud/stream/...` endpoint rather than straight at teddyCloud.
+It corrects the `Content-Type` header (teddyCloud sends a generic one,
+which browsers ignore in favor of the ha-teddycloud-card's own type hint,
+but which breaks playback for anything that fetches the stream on its
+own — e.g. AirPlay to a device on your local network), and gives every
+Tonie its own local cache (`content_cache.py`) rather than being a pure
+pass-through:
+
+- The first play of a Tonie streams live from teddyCloud while writing
+  the same bytes to disk in the background — no extra wait, and the
+  cache fills in by the time playback would naturally reach any given
+  point.
+- Every Range request (seeking) is served from that cache with a
+  correct, from-scratch implementation, never forwarded to teddyCloud's
+  own endpoint. That endpoint's embedded HTTP server has a real bug:
+  with `skip_header=true` (required — the raw file isn't valid Ogg
+  without it), seeking within roughly the last `TONIE_HEADER_LENGTH`
+  bytes of a recording can silently return the wrong bytes while still
+  claiming the requested range in its (already-sent) headers — confirmed
+  on real iOS hardware via a `MEDIA_ERR_DECODE` at `readyState=4`
+  (have-enough-data), i.e. a *successful* response with wrong content.
+  Root cause in teddyCloud's own source:
+  `src/cyclone/cyclone_tcp/http/http_server.c`, ~lines 1092-1157 — the
+  Content-Range/Content-Length are computed from the client's requested
+  offset *before* the header-length adjustment, but the later decision
+  of whether to actually seek in the file compares the *already-adjusted*
+  offset against the *unadjusted* total size. Fetching once and serving
+  Range requests locally sidesteps it entirely (the same technique
+  [github.com/ndeluigi/teddycloud-companion](https://github.com/ndeluigi/teddycloud-companion)'s
+  own server uses). A handful of most-recently-played Tonies are kept
+  (an LRU cache, capped rather than sized) — teddyCloud itself remains
+  the actual source of truth.
 
 This endpoint deliberately doesn't require a Home Assistant login — the
 same trust model as teddyCloud's own (also unauthenticated) download
-endpoint it forwards to, and necessary since a playback target like an
+endpoint it's sourced from, and necessary since a playback target like an
 AirPlay receiver has no HA session of its own. It only ever proxies to the
 teddyCloud server configured for that config entry.
 
@@ -89,8 +114,8 @@ teddyCloud server configured for that config entry.
 
 Each Tonie Library entry also carries a `player_url`
 (`/api/teddycloud/player/<entry_id>/<box>/<ruid>`) alongside `audio_url` — a
-minimal, self-contained HTML page (cover art, title, and just enough JS to
-register the
+minimal, self-contained HTML page (cover art, title, chapter navigation
+when a Tonie has more than one track, and enough JS to register the
 [Media Session API](https://developer.mozilla.org/en-US/docs/Web/API/Media_Session_API)
 for lock-screen controls) meant to be opened in its own browser tab. The
 ha-teddycloud-card uses this rather than playing inline: two different
@@ -101,127 +126,79 @@ it) after recovering from a websocket outage, unrelated to audio or
 networking specifically. A standalone tab isn't part of that dashboard's
 lifecycle at all, so rebuilding the dashboard can't touch it.
 
-Being a bare page alone still wasn't fully reliable in practice — iOS can
-suspend a backgrounded tab's network connections regardless of how little
-else the page is doing, which cuts a live stream off mid-playback. So this
-page downloads the whole file into memory before starting playback at all
-(a wait up front, roughly file size ÷ connection speed) rather than
-streaming it — once loaded, playback needs no network at all, so nothing
-iOS does to the tab's connections in the background can interrupt it.
+Playback tries three paths, in order, each falling back to the next if it
+doesn't work out:
 
-That local copy alone left AirPlay to another device broken, since a
-receiver has to fetch the source itself and a browser-local `blob:` URL
-has no network address to fetch. Fixed using
-[WebKit's own documented pattern](https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/)
-for exactly this: the `<audio>` element gets two `<source>` children, the
-local copy first (what actually plays) and this page's own stream proxy
-URL second, purely as an AirPlay fallback. Safari transparently switches
-to that second, fetchable URL when AirPlay is chosen — normal playback
-never touches it.
+**1. Native streaming.** A plain `<audio>` `<source>` pointed straight at
+the stream proxy above — no `fetch()`, no `Blob`, no `MediaSource` —
+exactly the same approach teddyCloud's own web UI's player uses. The
+proxy's Range support means the browser resolves duration and arbitrary
+seeking itself, immediately; confirmed on real iOS hardware to also
+survive the phone being locked/backgrounded during playback, same as any
+other native `<audio>` element (podcast web players rely on the same
+platform behavior). AirPlay needs no special handling either, since the
+source is already a plain network URL, not a `blob:` one.
 
-### Instant-start playback (experimental — prerelease only)
+One quirk, confirmed on real iOS hardware: `audio.play()` can reject with
+WebKit's `NotAllowedError` here specifically (duration/seeking still
+resolve correctly either way) — the other two paths' source is a local
+`blob:` URL (already-downloaded data) by the time `play()` runs, while
+this one is a genuine network URL, and iOS Safari's autoplay-with-sound
+policy doesn't extend the same allowance to that in a freshly
+`window.open()`'d tab. Not treated as a failure: the page keeps the
+native-stream source in place and shows a "tap ▶ to start" prompt instead
+of discarding it and falling back to MediaSource, since a direct tap on
+the visible play control is a fresh, in-document gesture that succeeds
+immediately.
 
-Waiting for the whole file to download before starting playback is
-reliable, but a real wait for long recordings. Prerelease versions (tagged
-`vX.Y.Z`, marked as a GitHub prerelease so they're never offered as a
-regular HACS update) try faster paths first, falling back to the proven
-full-download approach if they don't pan out. Install a prerelease via
-HACS's "Redownload" dialog (pick the version); roll back the same way if
-it doesn't hold up.
+**2. MediaSource/WebM remux**, if native streaming's `<source>` fails to
+load at all: `/api/teddycloud/remux/<entry_id>/<box>/<ruid>` remuxes (not
+transcodes — `ffmpeg -c:a copy`, no re-encoding, requires `ffmpeg` —
+bundled with Home Assistant OS and the official Container image, not
+guaranteed elsewhere) teddyCloud's Ogg/Opus into WebM as it downloads
+(sourced from the same local cache described above — instant if this
+Tonie has already been streamed once, one download if not), and the
+player page progressively appends it to a `MediaSource` (or, on iOS
+Safari 17.1+, `ManagedMediaSource`). WebM, not MP4: confirmed on real
+hardware that Safari's Opus support for MediaSource is for WebM
+specifically, not MP4. Appending is throttled and chunked to avoid
+`QuotaExceededError` — both a buffered-ahead cap and, since a *single*
+`fetch()` read can itself return a many-megabyte chunk regardless of how
+the read loop is paced, slicing every chunk into 64KB pieces before each
+append. Since teddyCloud's API has no total-duration field at all (even
+its own web UI only learns duration by measuring the browser's `<audio>`
+element after the full stream loads), the reported duration grows to
+match what's been appended so far rather than claiming to be a live
+stream; seeking ahead of the download isn't possible, since the remux
+always starts from the beginning.
 
-**Native streaming (tried first).** The simplest possible approach: a
-plain `<audio>` `<source>` pointed straight at the stream proxy, same as
-teddyCloud's own web UI's player — no `fetch()`, no `Blob`, no
-`MediaSource`. `stream_view.py` already forwards `Range` requests to
-teddyCloud (confirmed against teddyCloud's own source: it really does
-seek and serve partial content for cached files, not just accept the
-header and ignore it), so the browser resolves duration and arbitrary
-seeking itself, immediately, exactly like teddyCloud's own player does —
-verified against a real Chromium instance seeking to the last few seconds
-of a test file before anything beyond the first Range request had been
-fetched. AirPlay needs no special handling either, since the source is
-already a plain network URL rather than a `blob:` one.
+**3. Full download**, the original, always-available fallback: downloads
+the whole file into memory before starting playback, trading a wait up
+front for playback that needs no network at all once started. A single
+`blob:` URL alone would leave AirPlay to another device broken (a
+receiver has to fetch the source itself, and a `blob:` URL has no network
+address to fetch) — fixed using
+[WebKit's own documented pattern](https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/):
+the `<audio>` element gets two `<source>` children, the local copy first
+(what actually plays) and the plain stream-proxy URL second, purely as an
+AirPlay fallback.
 
-What's unverified: whether this survives iOS backgrounding/lock screen.
-The earlier finding that a live connection gets suspended by iOS was
-made against the HA dashboard's *inline* player, where a live HA
-websocket died at the same moment — it may have been that websocket, or
-general page-script `fetch()` activity, that iOS was actually suspending,
-not a native `<audio>` element's own network fetching (iOS has a
-sanctioned "background audio playback" exemption for exactly that,
-which is why browser-based podcast players keep working backgrounded).
-If so, this path should hold up fine despite being live network audio —
-only a real-device test settles it, which is the current open question.
+**Chapters, lock-screen seeking, and resuming.** teddyCloud's own
+per-track start offsets (`getTagIndex`'s `trackSeconds`, already used
+internally the same way by teddyCloud's own C server) show up as a
+prev/next chapter row on the page whenever a Tonie has more than one
+track, and as working previous/next-track buttons on the lock screen too.
+±15s skip buttons are wired up on the lock screen regardless. Playback
+position is remembered per Tonie (`localStorage`) across separate visits
+to the page, so reopening one you were partway through picks up close to
+where you left off rather than restarting at 0.
 
-Autoplay needs a tap on real iOS hardware: confirmed on a real device,
-`audio.play()` rejects with WebKit's `NotAllowedError` for this path
-specifically (duration/seeking still resolve correctly either way) —
-consistent with the other two paths' source being a local `blob:` URL
-(already-downloaded data) by the time `play()` runs, while this one is a
-genuine network URL, which iOS Safari's autoplay-with-sound policy
-doesn't extend the same allowance to in a freshly `window.open()`'d tab.
-Not treated as a failure: the page keeps the native-stream source in
-place and prompts for a tap instead of discarding it and falling back to
-MSE, since a direct tap on the visible native play control is a fresh,
-in-document gesture that succeeds immediately.
-
-Known limitation, likely an upstream teddyCloud bug, not fixable from
-this integration: seeking to within roughly the last few KB of a
-recording can fail with `MEDIA_ERR_DECODE`, confirmed on a real device
-(`networkState=1`/idle, `readyState=4`/have-enough-data at the moment of
-failure — the server *did* successfully deliver a full response, it was
-just the wrong bytes). Root cause, from reading teddyCloud's own source
-(`src/cyclone/cyclone_tcp/http/http_server.c:1092-1157`): with
-`skip_header=true` (required — the raw file isn't valid Ogg without it),
-the `Content-Range`/`Content-Length` sent to the client is computed from
-the request's byte offset *before* the TAF header-length adjustment is
-added, but the later decision of whether to actually seek within the
-file compares the *already-adjusted* offset against the *unadjusted*
-total size. For an offset within the last `TONIE_HEADER_LENGTH` bytes,
-that comparison can fail, silently falling back to serving from the
-start of the file while the already-sent headers still promise the
-near-end range — the client receives the TAF header plus early audio
-mislabeled as the requested position, which can't decode. Since this
-happens server-side before the request ever reaches this integration's
-proxy, there's no client-side fix; teddyCloud's own web UI player would
-hit the identical bug.
-
-**MediaSource/WebM remux (fallback #1).** If native streaming's `<source>`
-fails to load, `/api/teddycloud/remux/<entry_id>/<box>/<ruid>` remuxes
-(not transcodes — `ffmpeg -c:a copy`, no re-encoding) teddyCloud's
-Ogg/Opus into WebM as it downloads, and the player page progressively
-appends it to a `MediaSource` (or, on iOS Safari 17.1+,
-`ManagedMediaSource`). WebM, not MP4: an earlier version targeted
-fragmented MP4 based on research claiming Safari 18.4 added Opus-in-MP4
-support for MediaSource — wrong, confirmed by testing several MIME/codec
-strings on real hardware (`ManagedMediaSource.isTypeSupported`):
-`audio/mp4; codecs="opus"` → false, `audio/webm; codecs="opus"` → true.
-
-Requires `ffmpeg` (bundled with Home Assistant OS and the official
-Container image; not guaranteed elsewhere). Appending has to be throttled
-and chunked to avoid `QuotaExceededError`, confirmed on real iOS hardware
-in two distinct ways: appending as fast as data arrives overruns
-`SourceBuffer`'s memory quota outright (fixed with a buffered-ahead cap),
-and separately, a *single* `reader.read()` call from `fetch()` can itself
-return a chunk of several megabytes (observed: ~18.5MB in one call)
-regardless of how the read loop is paced, blowing the quota in one
-`appendBuffer()` call even with inter-read throttling in place — fixed by
-slicing every chunk into 64KB pieces before appending. Since teddyCloud's
-API has no total-duration field at all (confirmed against its own
-source — even its own web UI only learns duration by measuring the
-browser's `<audio>` element after the full stream loads), the reported
-duration grows to match what's actually been appended so far rather than
-claiming to be a live stream; seeking ahead of the download isn't
-possible either way, since the remux always starts from the beginning.
-
-**Full download (fallback #2, the original, always-available path.)**
-Downloads the whole file into memory before starting playback, trading a
-wait up front for playback that needs no network at all once started.
-
-What's *not* yet confirmed end-to-end on real iOS Safari over a real
-network connection: whether native streaming survives backgrounding (the
-main open question), and how `ManagedMediaSource`'s OS-driven buffer
-eviction under memory pressure behaves in practice for the WebM fallback.
+Known limitation, an upstream teddyCloud bug (not something this
+integration's proxy is exposed to, per the caching above, but worth
+knowing about if you ever use teddyCloud's own player directly): seeking
+within roughly the last `TONIE_HEADER_LENGTH` bytes of a *never-cached*
+stream can return `MEDIA_ERR_DECODE` — see "Audio streaming proxy" above
+for the root cause.
 
 ## Known limitations (by design, not a bug)
 
