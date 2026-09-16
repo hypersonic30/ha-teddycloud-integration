@@ -211,16 +211,22 @@ A `.nfc` sidecar upload also requires a configured `teddycloud-nfc-bridge`
 sidecar URL (see above) — without one, matches are found but never
 imported.
 
-**Matching is by filename, not tag identity**: a raw `.nfc` dump carries
-no title of its own — only a physical tag's identity, which is only
-discoverable *after* it's uploaded. So name your backup files after the
-Tonie itself (e.g. `Die Eiskönigin.nfc`); the integration compares each
-not-yet-acquired wishlist item's title against the repo's filenames
-case-insensitively, treating `-`/`_` as spaces (so `die-eiskoenigin.nfc`
-or `Die_Eiskönigin_Teil2.nfc` both match a wishlist title of "Die
-Eiskönigin"). On a match, the file is uploaded through the sidecar to
-**every** box on the server — a physical tag's content isn't box-specific,
-so there's no per-box choice to make.
+**Matching is by filename/path, not tag identity**: a raw `.nfc` dump
+carries no title of its own — only a physical tag's identity, which is
+only discoverable *after* it's uploaded. So name your backup files (and
+folders) after the Tonie itself; the integration compares each
+not-yet-acquired wishlist item's title against each `.nfc` file's *whole*
+relative path (subfolders included), case-insensitively, treating
+`-`/`_`/`/` as spaces and folding accents (`é` → `e`). So for a wishlist
+title of "Pokémon - Bisasam", a file at `Pokemon/Bisasam.nfc` matches
+just as well as one named `Pokemon - Bisasam.nfc` directly — the series
+can live in the folder name and the character/episode in the filename,
+as long as the title still reads as one contiguous phrase across that
+combined path (folder segments and the filename joined by spaces, in
+order). On a match, the
+file is uploaded through the sidecar to **every** box on the server — a
+physical tag's content isn't box-specific, so there's no per-box choice
+to make.
 
 This check runs automatically: once on Home Assistant startup, and
 afterward at the configured interval (a GitHub directory listing on every

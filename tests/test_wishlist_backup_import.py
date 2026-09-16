@@ -23,11 +23,17 @@ def test_filename_matches_title_handles_separators_and_case():
     assert not _filename_matches_title("Feuerwehrmann Sam.nfc", "Die Eiskoenigin")
 
 
-def test_filename_matches_title_uses_basename_only_for_nested_paths():
-    # nested under a subfolder (github_nfc_source.list_nfc_files() recurses)
+def test_filename_matches_title_across_folder_and_filename():
+    # Real reported case: series in the folder name, character in the
+    # filename - "Pokemon/Bisasam.nfc" for a wishlist title of
+    # "Pokémon - Bisasam". Also covers accent folding (é -> e).
+    assert _filename_matches_title("Pokemon/Bisasam.nfc", "Pokémon - Bisasam")
     assert _filename_matches_title("German/Familie Sonntag/Feuerwehrmann Sam.nfc", "Feuerwehrmann Sam")
-    # the *folder* name alone must not cause a false match
-    assert not _filename_matches_title("Elsa/Feuerwehrmann Sam.nfc", "Elsa")
+
+
+def test_filename_matches_title_folds_diacritics():
+    assert _filename_matches_title("Die Eiskonigin.nfc", "Die Eiskönigin")
+    assert _filename_matches_title("Die Eiskönigin.nfc", "Die Eiskonigin")
 
 
 class FakeGitHubSource:

@@ -2,13 +2,18 @@
 backup repo by filename, and auto-imports any match through the same
 teddycloud-nfc-bridge sidecar upload the assign_nfc_tag service uses.
 
-Matching is necessarily by filename, not by the tag's rUID: a raw .nfc
-dump carries no title/model metadata of its own - only a physical tag
-identity discoverable *after* it's uploaded. So this relies on the user
-naming backup files recognizably after the Tonie itself (see README's
-Wishlist section) and reuses the same case/separator-insensitive
-substring match tonies_catalog.py already uses for the wishlist's own
-search box.
+Matching is necessarily by filename/path, not by the tag's rUID: a raw
+.nfc dump carries no title/model metadata of its own - only a physical
+tag identity discoverable *after* it's uploaded. So this relies on the
+user naming backup files (and, per real-world feedback, folders)
+recognizably after the Tonie itself (see README's Wishlist section).
+
+Matching runs against the *whole* relative path, folders included, not
+just the bare filename: a common real organization splits a Tonie's
+identity across the two, e.g. a "Pokemon" folder holding "Bisasam.nfc"
+for a wishlist title of "Pokémon - Bisasam" - matching only the filename
+would never find that. Accents/diacritics are also folded (é -> e), since
+plain filenames often drop them even when the catalog title doesn't.
 
 Imports to *every* box on the entry, not just one: a physical tag's
 content isn't box-specific (that's the whole point of a Tonie figure),
@@ -19,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 
 from .const import DOMAIN
 from .github_nfc_source import GitHubNfcSourceError
@@ -28,15 +34,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"[-_]+", " ", text).strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[-_/]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip().lower()
 
 
 def _filename_matches_title(path: str, title: str) -> bool:
     """`path` may include subfolders (github_nfc_source.list_nfc_files()
-    recurses) - matched against its basename only, so an ancestor folder
-    name can't cause a false-positive match."""
-    basename = path.rsplit("/", 1)[-1]
-    stem = basename.rsplit(".", 1)[0]
+    recurses) - matched against the whole path, see module docstring."""
+    stem = path.rsplit(".", 1)[0]
     return _normalize(title) in _normalize(stem)
 
 
