@@ -23,29 +23,20 @@ entry-wide (any box's library counts) - this just mirrors that.
 from __future__ import annotations
 
 import logging
-import re
-import unicodedata
 
 from .const import DOMAIN
 from .github_nfc_source import GitHubNfcSourceError
 from .sidecar_api import SidecarApiError
+from .text_match import normalize_for_match
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = re.sub(r"[-_/]+", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip().lower()
 
 
 def _filename_matches_title(path: str, title: str) -> bool:
     """`path` may include subfolders (github_nfc_source.list_nfc_files()
     recurses) - matched against the whole path, see module docstring."""
     stem = path.rsplit(".", 1)[0]
-    return _normalize(title) in _normalize(stem)
+    return normalize_for_match(title) in normalize_for_match(stem)
 
 
 async def async_import_matching_wishlist_items(coordinator) -> int:

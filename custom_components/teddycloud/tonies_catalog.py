@@ -16,6 +16,7 @@ import logging
 import time
 
 from .api import TeddyCloudApiClient, TeddyCloudApiError
+from .text_match import normalize_for_match
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,14 +51,18 @@ class ToniesJsonCatalog:
             self._last_fetch = time.monotonic()
 
     async def search(self, query: str, limit: int = 30) -> list[dict]:
-        """Case-insensitive substring search across title/series/episode."""
+        """Accent/case/separator-insensitive substring search across
+        title/series/episode - see text_match.py. Catches e.g. a search
+        for "Pokemon" against a catalog title of "Pokémon"."""
         await self._ensure_fresh()
-        q = query.strip().lower()
+        q = normalize_for_match(query)
         if not q:
             return []
         results = []
         for entry in self._entries:
-            haystack = " ".join(str(entry.get(field) or "") for field in _SEARCH_FIELDS).lower()
+            haystack = normalize_for_match(
+                " ".join(str(entry.get(field) or "") for field in _SEARCH_FIELDS)
+            )
             if q in haystack:
                 results.append(entry)
                 if len(results) >= limit:
