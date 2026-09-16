@@ -87,7 +87,7 @@ class TeddyCloudRemuxView(HomeAssistantView):
         key = f"{entry_id}_{overlay}_{ruid}"
 
         def fetch():
-            return coordinator.client.open_content_stream(ruid, overlay, None)
+            return coordinator.client.open_content_stream(ruid, overlay)
 
         try:
             path = await cache.ensure_full(key, fetch)

@@ -74,7 +74,7 @@ class TeddyCloudStreamView(HomeAssistantView):
         key = f"{entry_id}_{overlay}_{ruid}"
 
         def fetch():
-            return coordinator.client.open_content_stream(ruid, overlay, None)
+            return coordinator.client.open_content_stream(ruid, overlay)
 
         range_header = request.headers.get("Range")
         start = range_start_or_none(range_header)

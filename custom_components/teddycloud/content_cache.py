@@ -186,6 +186,20 @@ class ContentCache:
             self._path(oldest).unlink(missing_ok=True)
             self._locks.pop(oldest, None)
 
+    def invalidate(self, key: str) -> None:
+        """Drop `key`'s cached file, if any.
+
+        Needed when a physical tag's content changes without its ruid
+        changing (e.g. assign_nfc_tag reassigning the same tag to
+        different audio) - otherwise a listener would keep hearing
+        whatever was cached under that ruid until it aged out of the LRU
+        or Home Assistant restarted.
+        """
+        if key in self._order:
+            self._order.remove(key)
+        self._locks.pop(key, None)
+        self._path(key).unlink(missing_ok=True)
+
     def close(self) -> None:
         shutil.rmtree(self._dir, ignore_errors=True)
 

@@ -68,6 +68,11 @@ TeddyCloud → the device → any entity, same as any other HA integration.
 
 Polling runs every 20 seconds.
 
+Settings > Devices & services > TeddyCloud > ⋮ > Download diagnostics
+gives a redacted dump (host, sidecar URL and each box's IP are stripped;
+Tonie titles are left out entirely, just a library count) — useful to
+attach to a bug report without fishing through logs.
+
 ## Audio streaming proxy
 
 The Tonie Library sensor's audio URLs point at this integration's own
@@ -109,6 +114,30 @@ same trust model as teddyCloud's own (also unauthenticated) download
 endpoint it's sourced from, and necessary since a playback target like an
 AirPlay receiver has no HA session of its own. It only ever proxies to the
 teddyCloud server configured for that config entry.
+
+Reassigning a physical tag to different content (the `assign_nfc_tag`
+service below) invalidates that tag's cache entry, if any — otherwise a
+listener would keep hearing whatever was cached under that ruid from
+before the reassignment until it aged out on its own.
+
+## Assigning a physical NFC tag to content
+
+`assign_nfc_tag` uploads a `.nfc` dump (as produced by tools like a
+Flipper Zero, or an app such as [SLI-Writer](https://github.com/Julienbxl/SLI-Writer))
+to an optional [teddycloud-nfc-bridge](https://github.com/hypersonic30/teddycloud-nfc-bridge)
+sidecar, which writes the corresponding `content.json` directly into
+teddyCloud's own content volume. Configure the sidecar's URL via
+Settings > Devices & services > TeddyCloud > Reconfigure; the service is
+unavailable without one. The ha-teddycloud-card's optional "Assign NFC
+tag" section (`show_nfc_assign: true`) is the easiest way to call it.
+
+Browser-based NFC scanning (Web NFC) can't replace the `.nfc` file: a
+tag's raw UID is all Web NFC (or even native Android/iOS NDEF APIs) can
+read, but the sidecar also needs each tag's raw memory-block content
+(`Data Content` in a Flipper `.nfc` file) for teddyCloud's cloud-auth
+verification — genuine per-tag factory data, not derivable from the UID,
+and reading it requires low-level ISO15693/MIFARE block access no browser
+API exposes, on any platform.
 
 ## Standalone player page
 

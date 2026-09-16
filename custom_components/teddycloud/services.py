@@ -28,8 +28,8 @@ ASSIGN_NFC_TAG_SCHEMA = vol.Schema(
 )
 
 
-def _resolve_box(hass: HomeAssistant, device_id: str) -> tuple[TeddyCloudCoordinator, str]:
-    """Map a device_id (as registered by TeddyCloudBoxEntity) to its coordinator + box_id."""
+def _resolve_box(hass: HomeAssistant, device_id: str) -> tuple[TeddyCloudCoordinator, str, str]:
+    """Map a device_id (as registered by TeddyCloudBoxEntity) to its coordinator, box_id and entry_id."""
     device = dr.async_get(hass).async_get(device_id)
     if device is None:
         raise ServiceValidationError(f"Unknown device: {device_id}")
@@ -39,12 +39,12 @@ def _resolve_box(hass: HomeAssistant, device_id: str) -> tuple[TeddyCloudCoordin
     if box_id is None or entry_id is None or entry_id not in hass.data.get(DOMAIN, {}):
         raise ServiceValidationError(f"Device {device_id} is not a TeddyCloud box")
 
-    return hass.data[DOMAIN][entry_id], box_id
+    return hass.data[DOMAIN][entry_id], box_id, entry_id
 
 
 async def _async_assign_nfc_tag(hass: HomeAssistant, call: ServiceCall) -> None:
     for device_id in call.data[ATTR_DEVICE_ID]:
-        coordinator, box_id = _resolve_box(hass, device_id)
+        coordinator, box_id, entry_id = _resolve_box(hass, device_id)
         if coordinator.sidecar_client is None:
             raise ServiceValidationError(
                 "No sidecar URL configured for this teddyCloud server — set one via "
@@ -68,6 +68,17 @@ async def _async_assign_nfc_tag(hass: HomeAssistant, call: ServiceCall) -> None:
                 box_id,
                 result.get("message"),
             )
+
+        # A physical tag's ruid never changes, but assigning it can point
+        # it at different audio - without this, a stream already cached
+        # under that ruid (see content_cache.py) would keep serving the
+        # *previous* content until it aged out of the cache or HA
+        # restarted, regardless of what teddyCloud now reports for it.
+        ruid = result.get("ruid")
+        if ruid:
+            cache = hass.data[DOMAIN].get("_content_cache")
+            if cache is not None:
+                cache.invalidate(f"{entry_id}_{box_id}_{ruid}")
 
         await coordinator.async_request_refresh()
 

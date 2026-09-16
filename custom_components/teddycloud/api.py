@@ -117,8 +117,14 @@ class TeddyCloudApiClient:
         """Turn a server-relative path from an API response into an absolute URL."""
         return f"{self._base_url}{path}"
 
-    def open_content_stream(self, ruid: str, overlay: str, range_header: str | None):
+    def open_content_stream(self, ruid: str, overlay: str):
         """Open a streaming GET to teddyCloud's own content endpoint.
+
+        Always a plain, unranged request: forwarding a client's own Range
+        header here is exactly the pattern that used to trigger a real bug
+        in teddyCloud's own Range handling (see content_cache.py), so
+        callers fetch the full content once and serve Range requests
+        themselves from that local cache instead.
 
         Returns an aiohttp request context manager — the caller enters it
         (`async with`) and streams `.content` itself; this deliberately
@@ -126,10 +132,8 @@ class TeddyCloudApiClient:
         can run far longer than a normal API call.
         """
         url = self.build_url(f"/content/download/{ruid[0:8].upper()}/{ruid[8:16].upper()}")
-        headers = {"Range": range_header} if range_header else {}
         return self._session.get(
             url,
             params={"overlay": overlay, "skip_header": "true"},
-            headers=headers,
             timeout=aiohttp.ClientTimeout(total=None, sock_connect=REQUEST_TIMEOUT),
         )
