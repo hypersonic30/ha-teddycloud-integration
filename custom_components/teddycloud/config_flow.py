@@ -127,7 +127,15 @@ class TeddyCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
             await self.async_set_unique_id(new_unique_id)
-            self._abort_if_unique_id_configured()
+            # Not _abort_if_unique_id_configured(): that aborts whenever the
+            # unique ID matches *any* entry, including this same one being
+            # reconfigured - which it always does unless host/port changed,
+            # so every reconfigure attempt hit "already_configured" and the
+            # only way to change settings was delete-and-recreate. The
+            # reconfigure-safe check (same pattern HA core integrations like
+            # roku use) only aborts if the new unique ID points at a
+            # genuinely *different* server than this entry was set up for.
+            self._abort_if_unique_id_mismatch(reason="unique_id_mismatch")
 
             error_key = await _test_connection(self.hass, user_input)
             if error_key is None:

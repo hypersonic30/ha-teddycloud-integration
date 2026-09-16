@@ -31,8 +31,12 @@ def _normalize(text: str) -> str:
     return re.sub(r"[-_]+", " ", text).strip().lower()
 
 
-def _filename_matches_title(filename: str, title: str) -> bool:
-    stem = filename.rsplit(".", 1)[0]
+def _filename_matches_title(path: str, title: str) -> bool:
+    """`path` may include subfolders (github_nfc_source.list_nfc_files()
+    recurses) - matched against its basename only, so an ancestor folder
+    name can't cause a false-positive match."""
+    basename = path.rsplit("/", 1)[-1]
+    stem = basename.rsplit(".", 1)[0]
     return _normalize(title) in _normalize(stem)
 
 
@@ -81,10 +85,13 @@ async def async_import_matching_wishlist_items(coordinator) -> int:
             _LOGGER.warning("teddycloud: could not fetch backup %s for %r: %s", name, title, err)
             continue
 
+        # Just the basename for the sidecar - any subfolder structure is
+        # our own organizational convention, not meaningful to teddyCloud.
+        basename = name.rsplit("/", 1)[-1]
         for box in coordinator.boxes:
             box_id = box["ID"]
             try:
-                result = await coordinator.sidecar_client.upload_nfc_tag(name, content, overlay=box_id)
+                result = await coordinator.sidecar_client.upload_nfc_tag(basename, content, overlay=box_id)
             except SidecarApiError as err:
                 _LOGGER.warning(
                     "teddycloud: could not import backup %s to box %s: %s", name, box_id, err

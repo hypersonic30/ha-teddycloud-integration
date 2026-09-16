@@ -23,6 +23,13 @@ def test_filename_matches_title_handles_separators_and_case():
     assert not _filename_matches_title("Feuerwehrmann Sam.nfc", "Die Eiskoenigin")
 
 
+def test_filename_matches_title_uses_basename_only_for_nested_paths():
+    # nested under a subfolder (github_nfc_source.list_nfc_files() recurses)
+    assert _filename_matches_title("German/Familie Sonntag/Feuerwehrmann Sam.nfc", "Feuerwehrmann Sam")
+    # the *folder* name alone must not cause a false match
+    assert not _filename_matches_title("Elsa/Feuerwehrmann Sam.nfc", "Elsa")
+
+
 class FakeGitHubSource:
     def __init__(self, names, content_by_name) -> None:
         self._names = names
@@ -78,9 +85,12 @@ async def test_import_matches_and_fans_out_to_every_box(monkeypatch):
     await wl.async_add("model-2", "Feuerwehrmann Sam", None, None)
     wl.items[1]["acquired"] = True  # already owned - must not be touched
 
+    # Nested under a subfolder - list_nfc_files() recurses, so this is the
+    # common real-world shape (one folder per person/series).
+    nested_path = "German/Familie Sonntag/Die Eiskönigin.nfc"
     github_source = FakeGitHubSource(
-        names=["Die Eiskönigin.nfc", "unrelated.nfc"],
-        content_by_name={"Die Eiskönigin.nfc": b"dump-bytes", "unrelated.nfc": b"other"},
+        names=[nested_path, "unrelated.nfc"],
+        content_by_name={nested_path: b"dump-bytes", "unrelated.nfc": b"other"},
     )
     sidecar_client = FakeSidecarClient(ruid_by_box={"box1": "abcd1234", "box2": "abcd1234"})
     cache = FakeCache()
@@ -91,9 +101,9 @@ async def test_import_matches_and_fans_out_to_every_box(monkeypatch):
     attempted = await async_import_matching_wishlist_items(coordinator)
 
     assert attempted == 2  # one upload per box
-    assert github_source.fetched == ["Die Eiskönigin.nfc"]  # fetched once, reused for both boxes
+    assert github_source.fetched == [nested_path]  # fetched once (full path), reused for both boxes
     assert sidecar_client.calls == [
-        ("Die Eiskönigin.nfc", b"dump-bytes", "box1"),
+        ("Die Eiskönigin.nfc", b"dump-bytes", "box1"),  # basename only, for the sidecar
         ("Die Eiskönigin.nfc", b"dump-bytes", "box2"),
     ]
     assert cache.invalidated == ["entry1_box1_abcd1234", "entry1_box2_abcd1234"]

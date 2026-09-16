@@ -62,9 +62,9 @@ class GitHubNfcSource:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
 
-    def _contents_url(self, sub_path: str) -> str:
-        full_path = f"{self._path}/{sub_path}" if self._path else sub_path
-        return f"https://api.github.com/repos/{self._repo}/contents/{full_path}"
+    def _contents_url(self, repo_path: str) -> str:
+        url = f"https://api.github.com/repos/{self._repo}/contents"
+        return f"{url}/{repo_path}" if repo_path else url
 
     async def _get_json(self, url: str):
         try:
@@ -88,21 +88,41 @@ class GitHubNfcSource:
         except (aiohttp.ClientError, TimeoutError) as err:
             raise GitHubNfcSourceError(str(err)) from err
 
-    async def list_nfc_files(self) -> list[str]:
-        """Return the names of every *.nfc file directly inside the
-        configured repo/branch/path (not recursive)."""
-        entries = await self._get_json(self._contents_url(""))
+    async def _list_dir(self, repo_path: str, rel_path: str) -> list[str]:
+        """Recursively collect *.nfc file paths under repo_path (a path
+        from the repo root, used for the API call), returning each one's
+        path relative to the configured self._path folder instead (what
+        fetch_nfc_file() and wishlist matching actually want) - a backup
+        repo is commonly organized into one folder per person/series
+        rather than kept flat, so this doesn't stop at the first level."""
+        entries = await self._get_json(self._contents_url(repo_path))
         if not isinstance(entries, list):
             raise GitHubNfcSourceError(f"{self._path or '/'} is not a folder in {self._repo}")
-        return sorted(
-            entry["name"]
-            for entry in entries
-            if entry.get("type") == "file" and entry.get("name", "").lower().endswith(".nfc")
-        )
+        names: list[str] = []
+        for entry in entries:
+            name = entry.get("name", "")
+            child_repo_path = f"{repo_path}/{name}" if repo_path else name
+            child_rel_path = f"{rel_path}/{name}" if rel_path else name
+            if entry.get("type") == "dir":
+                names.extend(await self._list_dir(child_repo_path, child_rel_path))
+            elif entry.get("type") == "file" and name.lower().endswith(".nfc"):
+                names.append(child_rel_path)
+        return names
 
-    async def fetch_nfc_file(self, name: str) -> bytes:
-        """Return one .nfc file's raw content."""
-        entry = await self._get_json(self._contents_url(name))
+    async def list_nfc_files(self) -> list[str]:
+        """Return the paths (relative to the configured repo/branch/path,
+        e.g. "Familie Sonntag/Feuerwehrmann Sam.nfc" for a file in a
+        subfolder) of every *.nfc file found anywhere under it."""
+        return sorted(await self._list_dir(self._path, ""))
+
+    async def fetch_nfc_file(self, relative_path: str) -> bytes:
+        """Return one .nfc file's raw content. `relative_path` is relative
+        to the configured repo/branch/path, as returned by
+        list_nfc_files()."""
+        full_path = f"{self._path}/{relative_path}" if self._path else relative_path
+        entry = await self._get_json(self._contents_url(full_path))
         if not isinstance(entry, dict) or entry.get("encoding") != "base64":
-            raise GitHubNfcSourceError(f"Unexpected response fetching {name} from {self._repo}")
+            raise GitHubNfcSourceError(
+                f"Unexpected response fetching {relative_path} from {self._repo}"
+            )
         return base64.b64decode(entry["content"])

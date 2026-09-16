@@ -53,7 +53,8 @@
     },
     "abort": {
       "reconfigure_successful": "TeddyCloud connection details updated successfully",
-      "already_configured": "This teddyCloud server is already configured"
+      "already_configured": "This teddyCloud server is already configured",
+      "unique_id_mismatch": "This host/port belongs to a different, already-configured teddyCloud server"
     }
   },
   "services": {

@@ -189,8 +189,14 @@ services > TeddyCloud > Reconfigure:
 
 - **NFC backup GitHub repo** (`owner/repo`) — leave empty to disable the
   feature entirely.
-- **Branch** — defaults to `main`.
-- **Subfolder** — optional; leave empty to use the repo root.
+- **Branch** — defaults to `main`; set this to whatever your repo's
+  default branch is actually called (e.g. `master`).
+- **Subfolder** — optional; leave empty to use the repo root. For a repo
+  page URL like `.../tree/master/German`, branch is `master` and
+  subfolder is `German` — just the path segment(s) after the branch
+  name, not the full URL. Subfolders of subfolders are searched too (so
+  `German/Familie Sonntag/...` is found automatically), so it's fine to
+  organize backups into nested folders instead of keeping them flat.
 - **Token** — a GitHub personal access token with read access. Required
   for a private repo; optional for a public one, but recommended anyway
   to raise GitHub's API rate limit (60/hour unauthenticated vs.
