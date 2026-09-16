@@ -251,15 +251,19 @@ def _render(
       }});
       audio.addEventListener("play", () => {{ navigator.mediaSession.playbackState = "playing"; }});
       audio.addEventListener("pause", () => {{ navigator.mediaSession.playbackState = "paused"; }});
-      // ±15s and, where there's more than one track, lock-screen
-      // previous/next-track buttons wired to real chapter navigation
-      // instead of doing nothing.
+      // Lock-screen skip buttons - confirmed on real iOS hardware that
+      // Safari's Now Playing widget only ever shows these two as a fixed
+      // ±10s regardless of the seekOffset requested here.
       navigator.mediaSession.setActionHandler("seekbackward", (details) => {{
         audio.currentTime = Math.max(0, audio.currentTime - (details.seekOffset || 15));
       }});
       navigator.mediaSession.setActionHandler("seekforward", (details) => {{
         audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + (details.seekOffset || 15));
       }});
+      // Registered for whatever platforms do support them, but confirmed
+      // on real iOS hardware that Safari's lock-screen widget does *not*
+      // surface previoustrack/nexttrack as buttons for web audio at all -
+      // chapter jumping stays an in-page-only feature there.
       if (CHAPTERS.length > 1) {{
         navigator.mediaSession.setActionHandler("previoustrack", prevChapter);
         navigator.mediaSession.setActionHandler("nexttrack", nextChapter);

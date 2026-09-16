@@ -194,13 +194,21 @@ internally) show up, whenever a Tonie has more than one track, as:
   available (a *separate* source from the offsets — teddyCloud's
   community tonies.json catalog, which only covers recognized official
   Tonies — so a custom/ripped Tonie's chapters just show as "Chapter N"
-  instead);
-- working previous/next-track buttons on the lock screen — standard
-  `MediaSession` behavior, no extra permissions needed.
+  instead). Confirmed on a real device with a 13-chapter Tonie: real
+  titles, correct highlighting, direct jumps.
+- `previoustrack`/`nexttrack` `MediaSession` handlers are also
+  registered, but confirmed on real iOS hardware to *not* surface as
+  lock-screen buttons — Safari's Now Playing widget there only exposes
+  play/pause and a fixed ±10s skip (see below), regardless of what a page
+  registers or what `seekOffset` it requests. Chapter jumping is
+  therefore an in-page-only feature on iOS for now; the handlers are left
+  in for whatever platforms do support them.
 
-±15s skip buttons are wired up on the lock screen regardless of chapter
-count. Playback position is remembered per Tonie (`localStorage`) across
-separate visits to the page, so reopening one you were partway through
+±10s skip buttons are wired up on the lock screen regardless of chapter
+count (registered as `seekbackward`/`seekforward` with a 15s offset, but
+iOS Safari always shows and uses its own fixed 10s regardless). Playback
+position is remembered per Tonie (`localStorage`) across separate visits
+to the page, so reopening one you were partway through
 picks up close to where you left off rather than restarting at 0.
 
 Known limitation, an upstream teddyCloud bug (not something this
