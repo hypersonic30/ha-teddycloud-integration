@@ -6,6 +6,13 @@ authentication (requires_auth defaults to True on HomeAssistantView) -
 they're only ever called from the authenticated frontend (the card's
 own JS, via hass.fetchWithAuth), never by an external playback target
 with no HA session of its own.
+
+Addressed by device_id, not config entry_id: a Lovelace card only has
+cheap access to hass.entities, whose entries carry device_id (not
+config_entry_id - that field only exists on the full entity registry
+entry, which isn't preloaded there). Same device_id -> entry_id
+resolution via the device registry that services.py's _resolve_box()
+already uses for the assign_nfc_tag service.
 """
 from __future__ import annotations
 
@@ -13,12 +20,19 @@ from aiohttp import web
 
 from homeassistant.components.http import KEY_HASS, HomeAssistantView
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
 
 
-def _coordinator(request: web.Request, entry_id: str):
+def _coordinator(request: web.Request, device_id: str):
     hass: HomeAssistant = request.app[KEY_HASS]
+    device = dr.async_get(hass).async_get(device_id)
+    if device is None:
+        return None
+    entry_id = next(iter(device.config_entries), None)
+    if entry_id is None:
+        return None
     return hass.data.get(DOMAIN, {}).get(entry_id)
 
 
@@ -28,11 +42,11 @@ class TeddyCloudCatalogSearchView(HomeAssistantView):
     a local copy instead of teddyCloud's own (18-result-capped) search
     endpoint."""
 
-    url = "/api/teddycloud/catalog_search/{entry_id}"
+    url = "/api/teddycloud/catalog_search/{device_id}"
     name = "api:teddycloud:catalog_search"
 
-    async def get(self, request: web.Request, entry_id: str) -> web.Response:
-        coordinator = _coordinator(request, entry_id)
+    async def get(self, request: web.Request, device_id: str) -> web.Response:
+        coordinator = _coordinator(request, device_id)
         if coordinator is None or coordinator.catalog is None:
             return web.Response(status=404)
 
@@ -63,17 +77,17 @@ class TeddyCloudCatalogSearchView(HomeAssistantView):
 class TeddyCloudWishlistView(HomeAssistantView):
     """Lists the wishlist, and adds an item to it."""
 
-    url = "/api/teddycloud/wishlist/{entry_id}"
+    url = "/api/teddycloud/wishlist/{device_id}"
     name = "api:teddycloud:wishlist"
 
-    async def get(self, request: web.Request, entry_id: str) -> web.Response:
-        coordinator = _coordinator(request, entry_id)
+    async def get(self, request: web.Request, device_id: str) -> web.Response:
+        coordinator = _coordinator(request, device_id)
         if coordinator is None or coordinator.wishlist is None:
             return web.Response(status=404)
         return web.json_response(coordinator.wishlist.items)
 
-    async def post(self, request: web.Request, entry_id: str) -> web.Response:
-        coordinator = _coordinator(request, entry_id)
+    async def post(self, request: web.Request, device_id: str) -> web.Response:
+        coordinator = _coordinator(request, device_id)
         if coordinator is None or coordinator.wishlist is None:
             return web.Response(status=404)
 
@@ -94,11 +108,11 @@ class TeddyCloudWishlistView(HomeAssistantView):
 class TeddyCloudWishlistItemView(HomeAssistantView):
     """Removes one wishlist item."""
 
-    url = "/api/teddycloud/wishlist/{entry_id}/{model}"
+    url = "/api/teddycloud/wishlist/{device_id}/{model}"
     name = "api:teddycloud:wishlist_item"
 
-    async def delete(self, request: web.Request, entry_id: str, model: str) -> web.Response:
-        coordinator = _coordinator(request, entry_id)
+    async def delete(self, request: web.Request, device_id: str, model: str) -> web.Response:
+        coordinator = _coordinator(request, device_id)
         if coordinator is None or coordinator.wishlist is None:
             return web.Response(status=404)
         await coordinator.wishlist.async_remove(model)
