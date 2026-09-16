@@ -347,7 +347,11 @@ def _render(
     // log lines can distinguish those. document.hidden is logged for the
     // same reason: was the tab actually backgrounded at the time.
     const logEvent = (label) => {{
-      const wallClock = new Date().toISOString().slice(11, 19);
+      // Local wall-clock time, not toISOString()'s UTC - this is read
+      // against the user's own clock while debugging a real session, and
+      // toISOString() being 1-2 hours off from what's on screen (DST-
+      // dependent) made that comparison wrong outside UTC.
+      const wallClock = new Date().toLocaleTimeString("en-GB", {{ hour12: false }});
       debugEl.textContent +=
         ` — [${{wallClock}}] ${{label}} at t=${{audio.currentTime.toFixed(1)}}s` +
         ` (readyState=${{audio.readyState}}, networkState=${{audio.networkState}}, hidden=${{document.hidden}})`;
