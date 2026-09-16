@@ -35,6 +35,15 @@ progressively appending a WebM remux (remux_view.py) to a
 MediaSource as it downloads. Falls back to the proven playViaFullDownload()
 above wherever MSE isn't usable (unsupported browser/codec, or any error
 partway through), so this is additive, not a replacement.
+
+The <audio> element has preload="auto": a real-device report of audible
+stuttering (while audio.currentTime kept advancing normally - not the
+seeking/caching issue found and fixed earlier, something else) turned
+out to be over a cellular+VPN connection rather than home WiFi, not yet
+confirmed whether it reproduces on WiFi at all. preload="auto" is a
+low-risk hint encouraging the browser to buffer further ahead than it
+otherwise would, worth having regardless of what that comparison shows -
+unconfirmed as an actual fix for what was reported.
 """
 from __future__ import annotations
 
@@ -159,7 +168,7 @@ def _render(
   {cover_html}
   <h1>{safe_title}</h1>
   <div id="status">Loading…</div>
-  <audio id="a" controls></audio>
+  <audio id="a" controls preload="auto"></audio>
   <div id="chapters" hidden>
     <button id="prevChapter" type="button">⏮</button>
     <span id="chapterLabel"></span>
