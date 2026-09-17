@@ -213,13 +213,32 @@ class TeddyCloudCoordinator(DataUpdateCoordinator[dict[str, TeddyCloudBoxData]])
         """Throttled wrapper around async_import_matching_wishlist_items() -
         runs at most once per self._backup_import_check_interval (the
         config flow's CONF_GITHUB_CHECK_INTERVAL), and must never let a
-        failure here fail the box poll it's piggybacking on."""
+        failure here fail the box poll it's piggybacking on.
+
+        Logs its own early-return reasons (unlike
+        async_import_matching_wishlist_items's own logging, which never
+        gets a chance to run at all if this wrapper bails out first) -
+        without this, someone with debug logging on and nothing
+        configured/due yet would see this feature produce zero log
+        output whatsoever, indistinguishable from it silently being
+        broken.
+        """
         if self.github_source is None or self.sidecar_client is None:
+            _LOGGER.debug(
+                "teddycloud: GitHub backup check skipped - github_source=%s sidecar_client=%s",
+                self.github_source is not None,
+                self.sidecar_client is not None,
+            )
             return
         now = time.monotonic()
-        if now - self._last_backup_import_check < self._backup_import_check_interval:
+        remaining = self._backup_import_check_interval - (now - self._last_backup_import_check)
+        if remaining > 0:
+            _LOGGER.debug(
+                "teddycloud: GitHub backup check skipped - %.0fs until the next one is due", remaining
+            )
             return
         self._last_backup_import_check = now
+        _LOGGER.debug("teddycloud: running scheduled GitHub backup check")
         try:
             await async_import_matching_wishlist_items(self)
         except Exception:  # noqa: BLE001 - must never break the regular box poll
