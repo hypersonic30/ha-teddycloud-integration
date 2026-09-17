@@ -88,7 +88,13 @@ class GitHubNfcSource:
                 resp.raise_for_status()
                 return await resp.json()
         except (aiohttp.ClientError, TimeoutError) as err:
-            raise GitHubNfcSourceError(str(err)) from err
+            # str(err) is "" for a bare TimeoutError/asyncio.TimeoutError -
+            # it's normally raised with no message at all, so a plain
+            # str(err) here produced a genuinely blank, useless log line
+            # ("could not list GitHub NFC backups: "). Always name the
+            # exception type so there's *something* to go on even then.
+            detail = str(err) or "no further detail from aiohttp"
+            raise GitHubNfcSourceError(f"{type(err).__name__}: {detail}") from err
 
     async def _list_dir(self, repo_path: str, rel_path: str) -> list[str]:
         """Recursively collect *.nfc file paths under repo_path (a path

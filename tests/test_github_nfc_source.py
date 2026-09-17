@@ -9,7 +9,7 @@ a canned directory tree - the recursion logic under test runs for real.
 """
 from __future__ import annotations
 
-from custom_components.teddycloud.github_nfc_source import GitHubNfcSource
+from custom_components.teddycloud.github_nfc_source import GitHubNfcSource, GitHubNfcSourceError
 
 # German/                     (the configured path)
 #   loose.nfc
@@ -76,3 +76,36 @@ def test_browse_url_for_a_plain_repo_and_branch():
 def test_browse_url_includes_the_configured_subfolder_url_encoded():
     source = GitHubNfcSource(hass=object(), repo="me/backups", branch="master", path="German/Familie Sonntag", token=None)
     assert source.browse_url() == "https://github.com/me/backups/tree/master/German/Familie%20Sonntag"
+
+
+async def test_get_json_error_message_is_never_blank(monkeypatch):
+    # Reported: a real log line read "could not list GitHub NFC backups: "
+    # with nothing after the colon - str(TimeoutError()) is "" when it's
+    # raised with no args, which aiohttp's own timeout handling does. The
+    # error message must always say *something*, even then.
+    class _RaisesOnEnter:
+        def __init__(self, exc):
+            self._exc = exc
+
+        async def __aenter__(self):
+            raise self._exc
+
+        async def __aexit__(self, *args):
+            return False
+
+    class FakeSession:
+        def get(self, *args, **kwargs):
+            return _RaisesOnEnter(TimeoutError())
+
+    source = GitHubNfcSource(hass=object(), repo="me/backups", branch="master", path="", token=None)
+    monkeypatch.setattr(
+        "custom_components.teddycloud.github_nfc_source.async_get_clientsession",
+        lambda hass: FakeSession(),
+    )
+
+    try:
+        await source._get_json(source._contents_url(""))
+        assert False, "expected GitHubNfcSourceError"
+    except GitHubNfcSourceError as err:
+        assert str(err).strip() != "", "error message must not be blank"
+        assert "TimeoutError" in str(err)
