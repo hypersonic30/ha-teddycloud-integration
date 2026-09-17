@@ -149,3 +149,25 @@ class TeddyCloudWishlistImportBackupsView(HomeAssistantView):
         if attempted:
             await coordinator.async_request_refresh()
         return web.json_response({"attempted": attempted})
+
+
+class TeddyCloudWishlistBackupSourceView(HomeAssistantView):
+    """Exposes the configured GitHub backup repo as a plain, human-
+    browsable URL - lets the card offer a manual "check what's actually
+    in the repo" link next to the wishlist, for exactly the kind of
+    "why wasn't this matched" question the backend's own logging
+    (wishlist_backup_import.py) helps answer from the other direction.
+    Kept as its own endpoint rather than added to TeddyCloudWishlistView's
+    response so that view's existing bare-array response shape (parsed as
+    such by the card already) doesn't change."""
+
+    url = "/api/teddycloud/wishlist/{device_id}/backup_source"
+    name = "api:teddycloud:wishlist_backup_source"
+
+    async def get(self, request: web.Request, device_id: str) -> web.Response:
+        coordinator = _coordinator(request, device_id)
+        if coordinator is None:
+            return web.Response(status=404)
+        if coordinator.github_source is None:
+            return web.json_response({"configured": False})
+        return web.json_response({"configured": True, "url": coordinator.github_source.browse_url()})

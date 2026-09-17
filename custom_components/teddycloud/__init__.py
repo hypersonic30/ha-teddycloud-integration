@@ -37,6 +37,7 @@ from .wishlist import Wishlist
 from .wishlist_backup_import import async_import_matching_wishlist_items
 from .wishlist_views import (
     TeddyCloudCatalogSearchView,
+    TeddyCloudWishlistBackupSourceView,
     TeddyCloudWishlistImportBackupsView,
     TeddyCloudWishlistItemView,
     TeddyCloudWishlistView,
@@ -64,6 +65,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.http.register_view(TeddyCloudWishlistView())
     hass.http.register_view(TeddyCloudWishlistItemView())
     hass.http.register_view(TeddyCloudWishlistImportBackupsView())
+    hass.http.register_view(TeddyCloudWishlistBackupSourceView())
     return True
 
 

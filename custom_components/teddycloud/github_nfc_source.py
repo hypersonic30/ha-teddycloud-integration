@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+from urllib.parse import quote
 
 import aiohttp
 
@@ -129,6 +130,15 @@ class GitHubNfcSource:
         e.g. "Familie Sonntag/Feuerwehrmann Sam.nfc" for a file in a
         subfolder) of every *.nfc file found anywhere under it."""
         return sorted(await self._list_dir(self._path, ""))
+
+    def browse_url(self) -> str:
+        """A human-browsable github.com URL for the configured repo/
+        branch/path - for a manual "what's actually in there" check (e.g.
+        a link in the card), independent of the API calls above."""
+        url = f"https://github.com/{quote(self._repo, safe='/')}/tree/{quote(self._branch, safe='')}"
+        if self._path:
+            url += "/" + quote(self._path, safe="/")
+        return url
 
     async def fetch_nfc_file(self, relative_path: str) -> bytes:
         """Return one .nfc file's raw content. `relative_path` is relative

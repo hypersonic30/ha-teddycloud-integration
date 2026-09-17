@@ -66,3 +66,13 @@ async def test_fetch_nfc_file_requests_path_relative_to_configured_folder(monkey
     assert seen_urls == [
         "https://api.github.com/repos/me/backups/contents/German/Familie Sonntag/Feuerwehrmann Sam.nfc"
     ]
+
+
+def test_browse_url_for_a_plain_repo_and_branch():
+    source = GitHubNfcSource(hass=object(), repo="me/backups", branch="master", path="", token=None)
+    assert source.browse_url() == "https://github.com/me/backups/tree/master"
+
+
+def test_browse_url_includes_the_configured_subfolder_url_encoded():
+    source = GitHubNfcSource(hass=object(), repo="me/backups", branch="master", path="German/Familie Sonntag", token=None)
+    assert source.browse_url() == "https://github.com/me/backups/tree/master/German/Familie%20Sonntag"

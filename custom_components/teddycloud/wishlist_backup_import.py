@@ -69,13 +69,26 @@ async def async_import_matching_wishlist_items(coordinator) -> int:
     immediately rather than on the next regular poll.
     """
     if coordinator.wishlist is None or coordinator.github_source is None or coordinator.sidecar_client is None:
+        _LOGGER.debug(
+            "teddycloud: skipping GitHub backup check - wishlist=%s github_source=%s sidecar_client=%s",
+            coordinator.wishlist is not None,
+            coordinator.github_source is not None,
+            coordinator.sidecar_client is not None,
+        )
         return 0
 
     pending_titles = {
         item["title"] for item in coordinator.wishlist.items if not item["acquired"] and item.get("title")
     }
     if not pending_titles:
+        _LOGGER.info("teddycloud: GitHub backup check - wishlist has nothing pending, skipping")
         return 0
+
+    _LOGGER.info(
+        "teddycloud: GitHub backup check - %d pending wishlist title(s): %s",
+        len(pending_titles),
+        sorted(pending_titles),
+    )
 
     try:
         names = await coordinator.github_source.list_nfc_files()
@@ -83,11 +96,31 @@ async def async_import_matching_wishlist_items(coordinator) -> int:
         _LOGGER.warning("teddycloud: could not list GitHub NFC backups: %s", err)
         return 0
 
+    _LOGGER.info(
+        "teddycloud: GitHub backup check - found %d .nfc file(s) in the repo: %s", len(names), names
+    )
+
     matches = [
         (name, title) for name in names for title in pending_titles if _filename_matches_title(name, title)
     ]
+
+    # The most directly useful line for "why wasn't my Tonie found": which
+    # pending titles matched *nothing* in the listing, by name - callers
+    # debugging a specific miss should be able to read the answer straight
+    # off this one line instead of reasoning about the whole batch.
+    unmatched = pending_titles - {title for _, title in matches}
+    if unmatched:
+        _LOGGER.info(
+            "teddycloud: GitHub backup check - no matching .nfc file for: %s", sorted(unmatched)
+        )
+
     if not matches:
         return 0
+
+    _LOGGER.info(
+        "teddycloud: GitHub backup check - matched: %s",
+        [f"{name!r} -> {title!r}" for name, title in matches],
+    )
 
     cache = coordinator.hass.data.get(DOMAIN, {}).get("_content_cache")
     attempted = 0
@@ -112,6 +145,9 @@ async def async_import_matching_wishlist_items(coordinator) -> int:
                 continue
             attempted += 1
             ruid = result.get("ruid")
+            _LOGGER.info(
+                "teddycloud: imported backup %s (%r) to box %s (ruid=%s)", name, title, box_id, ruid
+            )
             if ruid and cache is not None:
                 await cache.invalidate(f"{coordinator.entry_id}_{box_id}_{ruid}")
 

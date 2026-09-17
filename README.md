@@ -237,6 +237,25 @@ afterward at the configured interval (a GitHub directory listing on every
 an immediate check right after adding a wishlist item or a new backup
 file, call `POST /api/teddycloud/wishlist/<device_id>/import_from_backups`.
 
+**Debugging a match that isn't found**: each check logs a summary at
+`INFO` level — how many wishlist items are pending, every `.nfc` file
+found in the repo, and (most usefully) which pending titles matched
+*nothing*. These don't show up with Home Assistant's default logging, so
+add to `configuration.yaml`:
+
+```yaml
+logger:
+  logs:
+    custom_components.teddycloud: info
+```
+
+`GET /api/teddycloud/wishlist/<device_id>/backup_source` returns
+`{"configured": true, "url": "https://github.com/..."}` (or
+`{"configured": false}`) — a plain, human-browsable link to the
+configured repo/branch/folder, for checking by eye what's actually in
+there. The ha-teddycloud-card surfaces this as a link under the
+wishlist.
+
 ## Standalone player page
 
 Each Tonie Library entry also carries a `player_url`
