@@ -154,6 +154,33 @@ async def test_import_matches_and_fans_out_to_every_box(monkeypatch):
         ("Die Eiskönigin.nfc", b"dump-bytes", "box2"),
     ]
     assert cache.invalidated == ["entry1_box1_abcd1234", "entry1_box2_abcd1234"]
+    assert wl.items[0]["acquired"] is True
+
+
+async def test_import_marks_the_matched_item_acquired_directly(monkeypatch):
+    # Real reported case: the import itself (matching + sidecar upload)
+    # succeeded, and the Tonie genuinely showed up in the box's library
+    # (title/picture both correct) - but the wishlist entry stayed
+    # un-struck-through, because teddyCloud's own tonieInfo reported a
+    # different "model" for the freshly-downloaded content than the one
+    # recorded when the item was added via catalog search (likely a
+    # duplicate/regional tonies.json entry). Since we already know
+    # exactly which wishlist item this import was for, it must be marked
+    # acquired directly rather than only via that model cross-reference.
+    wl = await _make_wishlist(monkeypatch)
+    await wl.async_add("model-spiderman", "Spider-Man - MARVEL: Spider-Man", None, None)
+
+    path = "Marvel/Marvel - Spider-Man.nfc"
+    github_source = FakeGitHubSource(names=[path], content_by_name={path: b"dump"})
+    sidecar_client = FakeSidecarClient(ruid_by_box={"box1": "ruid1"})
+    coordinator = FakeCoordinator(
+        wl, github_source, sidecar_client, boxes=[{"ID": "box1"}], cache=FakeCache()
+    )
+
+    attempted = await async_import_matching_wishlist_items(coordinator)
+
+    assert attempted == 1
+    assert wl.items[0]["acquired"] is True
 
 
 async def test_import_skips_already_acquired_items(monkeypatch):

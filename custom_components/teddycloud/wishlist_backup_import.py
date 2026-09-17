@@ -77,9 +77,10 @@ async def async_import_matching_wishlist_items(coordinator) -> int:
         )
         return 0
 
-    pending_titles = {
-        item["title"] for item in coordinator.wishlist.items if not item["acquired"] and item.get("title")
-    }
+    pending_items = [
+        item for item in coordinator.wishlist.items if not item["acquired"] and item.get("title")
+    ]
+    pending_titles = {item["title"] for item in pending_items}
     if not pending_titles:
         _LOGGER.info("teddycloud: GitHub backup check - wishlist has nothing pending, skipping")
         return 0
@@ -134,6 +135,7 @@ async def async_import_matching_wishlist_items(coordinator) -> int:
         # Just the basename for the sidecar - any subfolder structure is
         # our own organizational convention, not meaningful to teddyCloud.
         basename = name.rsplit("/", 1)[-1]
+        any_box_succeeded = False
         for box in coordinator.boxes:
             box_id = box["ID"]
             try:
@@ -144,11 +146,29 @@ async def async_import_matching_wishlist_items(coordinator) -> int:
                 )
                 continue
             attempted += 1
+            any_box_succeeded = True
             ruid = result.get("ruid")
             _LOGGER.info(
                 "teddycloud: imported backup %s (%r) to box %s (ruid=%s)", name, title, box_id, ruid
             )
             if ruid and cache is not None:
                 await cache.invalidate(f"{coordinator.entry_id}_{box_id}_{ruid}")
+
+        if any_box_succeeded:
+            # Mark the matched wishlist item acquired directly instead of
+            # only relying on the coordinator's regular model-based cross-
+            # reference (wishlist.async_mark_acquired, driven by whatever
+            # "model" teddyCloud's own tonieInfo reports for the newly
+            # downloaded content). A real report showed those two models
+            # disagreeing even though the identical physical tag was now
+            # genuinely present (title/picture both correct in the box's
+            # library) - likely a duplicate/regional tonies.json catalog
+            # entry - leaving the wishlist stuck un-struck-through despite
+            # a fully successful, sidecar-confirmed import. We already
+            # know exactly which wishlist entry this was (matched by
+            # title), so there's no need to wait on that agreeing.
+            matching_item = next((item for item in pending_items if item["title"] == title), None)
+            if matching_item and matching_item.get("model"):
+                await coordinator.wishlist.async_mark_acquired({matching_item["model"]})
 
     return attempted
