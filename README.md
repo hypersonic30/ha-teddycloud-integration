@@ -214,19 +214,22 @@ imported.
 **Matching is by filename/path, not tag identity**: a raw `.nfc` dump
 carries no title of its own — only a physical tag's identity, which is
 only discoverable *after* it's uploaded. So name your backup files (and
-folders) after the Tonie itself; the integration compares each
-not-yet-acquired wishlist item's title against each `.nfc` file's *whole*
-relative path (subfolders included), case-insensitively, treating
-`-`/`_`/`/` as spaces and folding accents (`é` → `e`). So for a wishlist
-title of "Pokémon - Bisasam", a file at `Pokemon/Bisasam.nfc` matches
-just as well as one named `Pokemon - Bisasam.nfc` directly — the series
-can live in the folder name and the character/episode in the filename,
-as long as the title still reads as one contiguous phrase across that
-combined path (folder segments and the filename joined by spaces, in
-order). On a match, the
-file is uploaded through the sidecar to **every** box on the server — a
-physical tag's content isn't box-specific, so there's no per-box choice
-to make.
+folders) after the Tonie itself; the integration checks whether every
+word of a not-yet-acquired wishlist item's title shows up *somewhere* in
+the `.nfc` file's whole relative path (subfolders included) — regardless
+of order — case-insensitively, treating `-`/`_`/`/` as word separators
+and folding accents (`é` → `e`). Matching by word set rather than exact
+phrase order is deliberate: `tonies.json` itself isn't consistent about
+it (a title like "Pokémon - Bisasam" is Series - Character, but
+"Spider-Man - Marvel" is Character - Series), and a folder/filename split
+only ever reproduces whichever order you happened to type. So a wishlist
+title of "Pokémon - Bisasam" matches a file at `Pokemon/Bisasam.nfc`
+just as well as one named `Pokemon - Bisasam.nfc` directly, and
+"Spider-Man - Marvel" matches a `Marvel/Marvel - Spider-Man.nfc` just the
+same, even though the word order there is reversed from the title. On a
+match, the file is uploaded through the sidecar to **every** box on the
+server — a physical tag's content isn't box-specific, so there's no
+per-box choice to make.
 
 This check runs automatically: once on Home Assistant startup, and
 afterward at the configured interval (a GitHub directory listing on every

@@ -15,6 +15,15 @@ for a wishlist title of "Pokémon - Bisasam" - matching only the filename
 would never find that. Accents/diacritics are also folded (é -> e), since
 plain filenames often drop them even when the catalog title doesn't.
 
+Matching is by *word set*, not substring: tonies.json's own titles aren't
+consistently ordered ("Pokémon - Bisasam" is Series - Character, but
+"Spider-Man - Marvel" is Character - Series), and a folder/filename split
+only ever reproduces whichever order the user happened to type - a
+straight substring check would demand the title's words appear in that
+same order somewhere in the path, which fails for exactly the reversed-
+order titles most likely to show up. Every word of the title has to
+appear *somewhere* in the path instead, in any order.
+
 Imports to *every* box on the entry, not just one: a physical tag's
 content isn't box-specific (that's the whole point of a Tonie figure),
 and wishlist.async_mark_acquired's own "owned" check is already
@@ -34,9 +43,14 @@ _LOGGER = logging.getLogger(__name__)
 
 def _filename_matches_title(path: str, title: str) -> bool:
     """`path` may include subfolders (github_nfc_source.list_nfc_files()
-    recurses) - matched against the whole path, see module docstring."""
+    recurses) - matched against the whole path by word set, see module
+    docstring for why not a substring/order-sensitive check."""
     stem = path.rsplit(".", 1)[0]
-    return normalize_for_match(title) in normalize_for_match(stem)
+    title_words = normalize_for_match(title).split()
+    if not title_words:
+        return False
+    path_words = set(normalize_for_match(stem).split())
+    return all(word in path_words for word in title_words)
 
 
 async def async_import_matching_wishlist_items(coordinator) -> int:

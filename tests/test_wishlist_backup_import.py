@@ -31,6 +31,18 @@ def test_filename_matches_title_across_folder_and_filename():
     assert _filename_matches_title("German/Familie Sonntag/Feuerwehrmann Sam.nfc", "Feuerwehrmann Sam")
 
 
+def test_filename_matches_title_regardless_of_word_order():
+    # Real reported case: tonies.json titles aren't consistently ordered -
+    # "Pokémon - Bisasam" is Series - Character, but "Spider-Man - Marvel"
+    # is Character - Series. The repo had folder "Marvel" holding
+    # "Marvel - Spider-Man.nfc" - a plain substring check fails here
+    # because the title's word order ("Spider Man Marvel") never appears
+    # contiguously in the path ("Marvel Marvel Spider Man"), even though
+    # every word is present.
+    assert _filename_matches_title("Marvel/Marvel - Spider-Man.nfc", "Spider-Man - Marvel")
+    assert _filename_matches_title("Marvel/Spider-Man.nfc", "Spider-Man - Marvel")
+
+
 def test_filename_matches_title_folds_diacritics():
     assert _filename_matches_title("Die Eiskonigin.nfc", "Die Eiskönigin")
     assert _filename_matches_title("Die Eiskönigin.nfc", "Die Eiskonigin")
