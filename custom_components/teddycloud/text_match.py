@@ -30,11 +30,16 @@ _GERMAN_TRANSLITERATIONS = {
 
 def normalize_for_match(text: str) -> str:
     """Fold `text` to a case/accent/punctuation-insensitive form for
-    matching: German umlauts spelled out (ä -> ae), other diacritics
-    stripped (é -> e) via NFKD decomposition, everything that isn't a
-    letter or digit (spaces, -/_/:/. etc.) collapsed to single spaces,
-    lowercased."""
+    matching: "&" spelled out as "und", German umlauts spelled out
+    (ä -> ae), other diacritics stripped (é -> e) via NFKD decomposition,
+    everything that isn't a letter or digit (spaces, -/_/:/. etc.)
+    collapsed to single spaces, lowercased."""
     text = text.lower()
+    # "Bibi & Tina" vs. a catalog title spelling out "Bibi und Tina" - "&"
+    # would otherwise just fold away as punctuation below, dropping the
+    # word "und" entirely from whichever side used the symbol instead of
+    # spelling it out, the same class of miss as the umlaut spellings.
+    text = text.replace("&", " und ")
     for umlaut, replacement in _GERMAN_TRANSLITERATIONS.items():
         text = text.replace(umlaut, replacement)
     text = unicodedata.normalize("NFKD", text)

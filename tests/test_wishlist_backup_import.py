@@ -68,6 +68,15 @@ def test_filename_matches_title_ignores_punctuation_in_the_title():
     assert _filename_matches_title("Marvel/Marvel - Spider-Man.nfc", "Spider-Man - MARVEL: Spider-Man")
 
 
+def test_filename_matches_title_treats_ampersand_as_und():
+    # "&" is a common stand-in for "und" in filenames even when the
+    # catalog title spells it out (or vice versa) - plain punctuation
+    # folding alone would just drop "&" and lose that word entirely on
+    # whichever side used the symbol.
+    assert _filename_matches_title("Bibi & Tina.nfc", "Bibi und Tina")
+    assert _filename_matches_title("Bibi und Tina.nfc", "Bibi & Tina")
+
+
 class FakeGitHubSource:
     def __init__(self, names, content_by_name) -> None:
         self._names = names
