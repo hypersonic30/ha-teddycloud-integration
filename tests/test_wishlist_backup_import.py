@@ -43,9 +43,29 @@ def test_filename_matches_title_regardless_of_word_order():
     assert _filename_matches_title("Marvel/Spider-Man.nfc", "Spider-Man - Marvel")
 
 
-def test_filename_matches_title_folds_diacritics():
-    assert _filename_matches_title("Die Eiskonigin.nfc", "Die Eiskönigin")
-    assert _filename_matches_title("Die Eiskönigin.nfc", "Die Eiskonigin")
+def test_filename_matches_title_folds_non_german_diacritics():
+    assert _filename_matches_title("Cafe.nfc", "Café")
+
+
+def test_filename_matches_title_spells_out_german_umlauts():
+    # Real reported case: a repo folder was literally named
+    # "Bobo Siebenschlaefer" for a wishlist title of "Bobo Siebenschläfer"
+    # - German has two common ASCII spellings for an umlaut (drop the
+    # diaeresis, or spell it out as two letters), and only the spelled-out
+    # form ("ae") matched what was actually in the repo. Dropping alone
+    # (ä -> a, "siebenschlafer") is a different word from "siebenschlaefer".
+    assert _filename_matches_title(
+        "German/Bobo Siebenschlaefer/Bobo baggert und weitere Folgen.nfc",
+        "Bobo Siebenschläfer - Bobo baggert und weitere Folgen",
+    )
+
+
+def test_filename_matches_title_ignores_punctuation_in_the_title():
+    # Real reported case: tonies.json's own title was "Spider-Man - MARVEL:
+    # Spider-Man" - the colon stuck to "marvel", so "marvel:" never
+    # word-for-word matched the path's plain "marvel" until punctuation
+    # (not just -/_//) was folded to spaces too.
+    assert _filename_matches_title("Marvel/Marvel - Spider-Man.nfc", "Spider-Man - MARVEL: Spider-Man")
 
 
 class FakeGitHubSource:
