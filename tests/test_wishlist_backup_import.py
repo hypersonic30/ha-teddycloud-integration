@@ -77,6 +77,27 @@ def test_filename_matches_title_treats_ampersand_as_und():
     assert _filename_matches_title("Bibi und Tina.nfc", "Bibi & Tina")
 
 
+def test_filename_matches_title_ignores_und_weitere_folgen_suffix():
+    # Real reported case: catalog title "Bobo Siebenschläfer - Bobo beim
+    # Kinderarzt und weitere Folgen" for a backup file simply named "Bobo
+    # beim Kinderarzt.nfc" - sibling files in the very same folder *do*
+    # spell out "und weitere Folgen"/"und weiter[e Reise]" in their own
+    # filenames, confirming this is inconsistent per-file rather than a
+    # naming convention the matcher could rely on. The bonus-content
+    # boilerplate words must not be required in the path, while the
+    # actual identifying words (Bobo, Siebenschläfer, beim, Kinderarzt)
+    # still are.
+    assert _filename_matches_title(
+        "German/Bobo Siebenschlaefer/Bobo beim Kinderarzt.nfc",
+        "Bobo Siebenschläfer - Bobo beim Kinderarzt und weitere Folgen",
+    )
+    # Still shouldn't match a same-folder sibling for a different story.
+    assert not _filename_matches_title(
+        "German/Bobo Siebenschlaefer/Bobo feiert Kindergeburtstag.nfc",
+        "Bobo Siebenschläfer - Bobo beim Kinderarzt und weitere Folgen",
+    )
+
+
 class FakeGitHubSource:
     def __init__(self, names, content_by_name) -> None:
         self._names = names

@@ -28,6 +28,20 @@ Imports to *every* box on the entry, not just one: a physical tag's
 content isn't box-specific (that's the whole point of a Tonie figure),
 and wishlist.async_mark_acquired's own "owned" check is already
 entry-wide (any box's library counts) - this just mirrors that.
+
+Title words in `_TITLE_FILLER_WORDS` don't have to appear in the path at
+all: tonies.json commonly titles a multi-track figure "<Story> und
+weitere Folgen/Geschichten/Abenteuer/Erzählungen" (bonus-content
+boilerplate, not part of what identifies the figure), but a backup's own
+filename often just names the main story - real case: catalog title
+"Bobo Siebenschläfer - Bobo beim Kinderarzt und weitere Folgen" for a
+backup file simply named "Bobo beim Kinderarzt.nfc" (siblings in the
+same folder *do* spell out "und weitere Folgen" in their own filenames,
+confirming this is inconsistent per-file, not a naming convention to
+rely on). Requiring every title word in the path (as normal) would
+never match this - these specific filler words are exempted from that
+requirement instead, while every other title word still has to be
+present, same as before.
 """
 from __future__ import annotations
 
@@ -40,13 +54,26 @@ from .text_match import normalize_for_match
 
 _LOGGER = logging.getLogger(__name__)
 
+_TITLE_FILLER_WORDS = {
+    "und",
+    "weitere",
+    "folgen",
+    "geschichten",
+    "abenteuer",
+    "erzaehlungen",
+}
+
 
 def _filename_matches_title(path: str, title: str) -> bool:
     """`path` may include subfolders (github_nfc_source.list_nfc_files()
     recurses) - matched against the whole path by word set, see module
-    docstring for why not a substring/order-sensitive check."""
+    docstring for why not a substring/order-sensitive check, and for why
+    `_TITLE_FILLER_WORDS` are dropped from the requirement rather than
+    matched normally."""
     stem = path.rsplit(".", 1)[0]
-    title_words = normalize_for_match(title).split()
+    title_words = [
+        word for word in normalize_for_match(title).split() if word not in _TITLE_FILLER_WORDS
+    ]
     if not title_words:
         return False
     path_words = set(normalize_for_match(stem).split())
